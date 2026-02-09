@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAF Wiki — Custom Animation Framework for RE2 Remake</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #e0e0e0; background: #1a1a2e; display: flex; min-height: 100vh; }
+a { color: #7ec8e3; text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* Sidebar */
+#sidebar { width: 280px; min-width: 280px; background: #16213e; border-right: 1px solid #0f3460; padding: 20px 0; overflow-y: auto; position: fixed; top: 0; bottom: 0; left: 0; }
+#sidebar h2 { color: #e94560; padding: 0 20px 15px; font-size: 1.1em; border-bottom: 1px solid #0f3460; margin-bottom: 10px; }
+#sidebar .cat { padding: 8px 20px 4px; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-top: 10px; }
+#sidebar a { display: block; padding: 6px 20px; color: #c0c0c0; font-size: 0.9em; transition: background 0.15s; }
+#sidebar a:hover, #sidebar a.active { background: #0f3460; color: #7ec8e3; text-decoration: none; }
+/* Main Content */
+#content { margin-left: 280px; flex: 1; padding: 30px 50px 60px; max-width: 900px; }
+h1 { color: #e94560; font-size: 1.8em; margin-bottom: 10px; border-bottom: 2px solid #e94560; padding-bottom: 8px; }
+h2 { color: #e94560; font-size: 1.4em; margin-top: 35px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+h3 { color: #7ec8e3; font-size: 1.1em; margin-top: 25px; margin-bottom: 8px; }
+p, li { line-height: 1.65; margin-bottom: 8px; }
+ul, ol { padding-left: 25px; }
+code { background: #0f3460; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; font-family: "Cascadia Code", "Fira Code", Consolas, monospace; }
+pre { background: #0d1b2a; border: 1px solid #1b2838; border-radius: 5px; padding: 15px; overflow-x: auto; margin: 12px 0; font-size: 0.85em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #333; padding: 8px 12px; text-align: left; font-size: 0.9em; }
+th { background: #0f3460; color: #7ec8e3; }
+tr:nth-child(even) { background: #1b2838; }
+.section { display: none; }
+.section.active { display: block; }
+.note { background: #1b2838; border-left: 4px solid #e94560; padding: 10px 15px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+.tip { background: #1b2838; border-left: 4px solid #7ec8e3; padding: 10px 15px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+.version-badge { display: inline-block; background: #e94560; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; }
+@media (max-width: 768px) {
+  #sidebar { width: 100%; min-width: 100%; position: relative; border-right: none; border-bottom: 1px solid #0f3460; }
+  #content { margin-left: 0; padding: 20px; }
+  body { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<nav id="sidebar">
+  <h2>CAF Wiki <span class="version-badge">v1.0.0</span></h2>
+
+  <div class="cat">User Guide</div>
+  <a href="#overview" onclick="show('overview')">Overview</a>
+  <a href="#installation" onclick="show('installation')">Installation</a>
+  <a href="#controls" onclick="show('controls')">Controls &amp; Usage</a>
+  <a href="#settings" onclick="show('settings')">Settings Panel</a>
+
+  <div class="cat">How It Works</div>
+  <a href="#architecture" onclick="show('architecture')">Architecture</a>
+  <a href="#animation-pipeline" onclick="show('animation-pipeline')">Animation Pipeline</a>
+  <a href="#playback-engine" onclick="show('playback-engine')">Playback Engine</a>
+  <a href="#event-system" onclick="show('event-system')">Event System</a>
+
+  <div class="cat">Modder Guide</div>
+  <a href="#creating-mods" onclick="show('creating-mods')">Creating Mod Packages</a>
+  <a href="#manifest-ref" onclick="show('manifest-ref')">manifest.json Reference</a>
+  <a href="#python-tools" onclick="show('python-tools')">Python Tools</a>
+  <a href="#chains" onclick="show('chains')">Chains &amp; Combos</a>
+  <a href="#custom-ui" onclick="show('custom-ui')">Custom Mod UI</a>
+
+  <div class="cat">API Reference</div>
+  <a href="#api-playback" onclick="show('api-playback')">Playback API</a>
+  <a href="#api-events" onclick="show('api-events')">Event API</a>
+  <a href="#api-registration" onclick="show('api-registration')">Registration API</a>
+  <a href="#api-utilities" onclick="show('api-utilities')">Utilities API</a>
+
+  <div class="cat">Technical Reference</div>
+  <a href="#binary-format" onclick="show('binary-format')">Binary Format (.motlist)</a>
+  <a href="#dynamicmotionbank" onclick="show('dynamicmotionbank')">DynamicMotionBank</a>
+  <a href="#fsm-control" onclick="show('fsm-control')">FSM Control</a>
+  <a href="#bone-mapping" onclick="show('bone-mapping')">Bone Mapping</a>
+
+  <div class="cat">Development</div>
+  <a href="#dev-history" onclick="show('dev-history')">Development History</a>
+  <a href="#lessons-learned" onclick="show('lessons-learned')">Lessons Learned</a>
+  <a href="#troubleshooting" onclick="show('troubleshooting')">Troubleshooting</a>
+</nav>
+
+<main id="content">
+
+<!-- ==================== OVERVIEW ==================== -->
+<div id="overview" class="section active">
+<h1>Custom Animation Framework (CAF)</h1>
+<p>CAF is an event-driven custom animation framework for Resident Evil 2 Remake, built on <a href="https://github.com/praydog/REFramework">REFramework</a>. It enables modders to add entirely new animations to the game using JSON manifests and binary animation files, without writing any engine code.</p>
+
+<h2>Key Features</h2>
+<ul>
+  <li><strong>Mod Package System</strong> &mdash; Drop a <code>manifest.json</code> + binary files, framework auto-discovers and loads them</li>
+  <li><strong>Event-Driven Bindings</strong> &mdash; Bind animations to key presses, damage events, enemy proximity, and more</li>
+  <li><strong>DynamicMotionBank Playback</strong> &mdash; Animations play through the RE Engine's native motion system (not bone overrides)</li>
+  <li><strong>Root Motion</strong> &mdash; Configurable character movement during animations with wall collision detection</li>
+  <li><strong>Layer Overlay Mode</strong> &mdash; Play animations on upper body while player continues moving</li>
+  <li><strong>Chain/Combo System</strong> &mdash; Multi-step animation sequences with input buffering and timing windows</li>
+  <li><strong>Per-Mod Settings UI</strong> &mdash; Mods register custom ImGui panels for real-time parameter tuning</li>
+  <li><strong>EventBus</strong> &mdash; Priority-based pub/sub system for inter-mod communication</li>
+  <li><strong>Python Toolchain</strong> &mdash; Convert animation data to RE Engine binary format</li>
+</ul>
+
+<h2>Included Example: RE3 Dodge Pack</h2>
+<p>The framework ships with a four-directional dodge system inspired by RE3 Remake's dodge mechanic. Press V + WASD to perform directional dodge rolls with root motion, wall collision detection, and configurable speed/distance.</p>
+
+<h2>Project Structure</h2>
+<pre><code>reframework/
+  autorun/
+    CAF_ModAPI.lua              -- Main framework (~1100 lines)
+    CAF_ModAPI/API.lua          -- Requireable API module
+    CAF_re3_dodge_settings.lua  -- RE3 dodge settings companion
+  data/
+    CAF_mods/
+      re3_dodge/manifest.json   -- RE3 dodge mod package
+natives/
+  x64/
+    CAF_custom/
+      dodge_front.motlist.85    -- Animation binary files
+      dodge_front.motbank.1     -- Bank wrapper files
+      (+ back, left, right variants)</code></pre>
+</div>
+
+<!-- ==================== INSTALLATION ==================== -->
+<div id="installation" class="section">
+<h1>Installation</h1>
+
+<h2>Requirements</h2>
+<ul>
+  <li>Resident Evil 2 Remake (Steam)</li>
+  <li><a href="https://www.nexusmods.com/residentevil22019/mods/11">REFramework</a> installed</li>
+</ul>
+
+<h2>Steps</h2>
+<ol>
+  <li>Download and extract the CAF release zip</li>
+  <li>Copy all contents into your RE2 Remake game folder (e.g., <code>C:\SteamLibrary\steamapps\common\RESIDENT EVIL 2  BIOHAZARD RE2\</code>)</li>
+  <li>The <code>reframework/</code> and <code>natives/</code> folders should merge with existing ones</li>
+  <li>Launch the game</li>
+  <li>Press <strong>Insert</strong> to open REFramework menu</li>
+  <li>Look for <strong>"CAF Mod API v1.0"</strong> in the menu tree</li>
+</ol>
+
+<h2>Verifying Installation</h2>
+<p>Open the REFramework menu. Under "CAF Mod API v1.0" you should see:</p>
+<ul>
+  <li>Status line showing "initialized" or "ready"</li>
+  <li>"Loaded Mods" section with "RE3 Dodge Pack" listed</li>
+  <li>Per-animation [PLAY] buttons for testing</li>
+</ul>
+<p>You can also check <code>re2_framework_log.txt</code> in the game folder for <code>[CAF]</code> log entries.</p>
+
+<h2>Uninstallation</h2>
+<p>Delete the following from your game folder:</p>
+<ul>
+  <li><code>reframework/autorun/CAF_ModAPI.lua</code></li>
+  <li><code>reframework/autorun/CAF_ModAPI/</code> folder</li>
+  <li><code>reframework/autorun/CAF_re3_dodge_settings.lua</code></li>
+  <li><code>reframework/data/CAF_mods/</code> folder</li>
+  <li><code>natives/x64/CAF_custom/</code> folder</li>
+</ul>
+</div>
+
+<!-- ==================== CONTROLS ==================== -->
+<div id="controls" class="section">
+<h1>Controls &amp; Usage</h1>
+
+<h2>RE3 Dodge Pack Controls</h2>
+<table>
+  <tr><th>Input</th><th>Action</th></tr>
+  <tr><td>V + W</td><td>Forward dodge roll</td></tr>
+  <tr><td>V + S</td><td>Backward dodge</td></tr>
+  <tr><td>V + A</td><td>Left dodge roll</td></tr>
+  <tr><td>V + D</td><td>Right dodge roll</td></tr>
+  <tr><td>V + direction (during dodge)</td><td>Cancel into new direction</td></tr>
+</table>
+
+<h2>How Dodge-Cancel Works</h2>
+<p>Pressing V + a new direction while a dodge animation is already playing triggers a new <code>changeMotion()</code> call. The active session detects the bank ID change and auto-ends, while the new session begins immediately. This creates a fluid cancel-into-new-direction feel without any special chain system logic.</p>
+
+<h2>Framework Menu</h2>
+<p>Press <strong>Insert</strong> to open REFramework, then expand <strong>"CAF Mod API v1.0"</strong>. The menu shows:</p>
+<ul>
+  <li><strong>Status</strong> &mdash; Framework state and player cache info</li>
+  <li><strong>Loaded Mods</strong> &mdash; Each mod with its animations and [PLAY] buttons</li>
+  <li><strong>Per-Mod Settings</strong> &mdash; Custom settings panels registered by companion scripts</li>
+  <li><strong>Active Sessions</strong> &mdash; Currently playing animations with frame counters</li>
+  <li><strong>Event Log</strong> &mdash; Rolling log of recent events for debugging</li>
+</ul>
+</div>
+
+<!-- ==================== SETTINGS ==================== -->
+<div id="settings" class="section">
+<h1>Settings Panel</h1>
+<p>The RE3 Dodge Pack includes a companion settings script (<code>CAF_re3_dodge_settings.lua</code>) that registers a custom UI panel. Other mods can do the same using <code>CAF.registerModUI()</code>.</p>
+
+<h2>Dodge Settings</h2>
+<table>
+  <tr><th>Setting</th><th>Range</th><th>Default</th><th>Description</th></tr>
+  <tr><td>Speed</td><td>0.5 - 5.0</td><td>2.0</td><td>Animation playback speed multiplier</td></tr>
+  <tr><td>Root motion</td><td>on/off</td><td>on</td><td>Enable character movement during dodge</td></tr>
+  <tr><td>Distance</td><td>0.5 - 8.0m</td><td>2.5</td><td>How far the dodge moves the character</td></tr>
+  <tr><td>Move start %</td><td>0.0 - 0.5</td><td>0.01</td><td>Animation progress when movement begins</td></tr>
+  <tr><td>Move end %</td><td>0.5 - 1.0</td><td>0.99</td><td>Animation progress when movement ends</td></tr>
+  <tr><td>Blend frames</td><td>0 - 30</td><td>0</td><td>Transition smoothness (frames)</td></tr>
+  <tr><td>Cooldown</td><td>0.0 - 3.0s</td><td>0.0</td><td>Minimum time between dodges</td></tr>
+  <tr><td>Dodge key</td><td>any key</td><td>V</td><td>Click to rebind</td></tr>
+  <tr><td>Debug log</td><td>on/off</td><td>off</td><td>Verbose logging to re2_framework_log.txt</td></tr>
+</table>
+<p>Settings are saved automatically to <code>CAF_re3_dodge_settings.json</code> (debounced, 0.5s after last change) and persist between game sessions.</p>
+</div>
+
+<!-- ==================== ARCHITECTURE ==================== -->
+<div id="architecture" class="section">
+<h1>Architecture</h1>
+<p>CAF is a single-file Lua framework (<code>CAF_ModAPI.lua</code>, ~1100 lines) that runs inside REFramework. It exposes a global <code>CAF</code> table and a <code>require</code>-able API module.</p>
+
+<h2>Core Components</h2>
+<pre><code>CAF_ModAPI.lua
+  |
+  +-- Registry          -- Stores mods, animations, event bindings, chains, loaded banks
+  +-- EventBus          -- Priority-based pub/sub with reentrancy protection
+  +-- PlayerCache       -- Caches player GameObject, Motion, Transform, CC, FSM
+  +-- BankManager       -- Loads DynamicMotionBank instances via sdk.create_resource
+  +-- PlaybackEngine    -- Manages animation sessions (play/stop/update per frame)
+  +-- FSM Control       -- Pauses/unpauses MotionFsm2 for full-body takeover
+  +-- RootMotion        -- Per-session movement in PrepareRendering with wall detection
+  +-- ModLoader         -- Auto-discovers manifest.json files in CAF_mods/
+  +-- UI                -- ImGui menu with mod list, session status, event log</code></pre>
+
+<h2>Execution Timing</h2>
+<pre><code>re.on_frame():
+  - Input polling (key edge detection)
+  - Chain trigger checking
+  - EventBus dispatch (key_pressed, etc.)
+  - PlaybackEngine.update() (frame tracking, end detection, cleanup)
+  - Health/proximity polling (throttled)
+
+PrepareRendering:
+  - Root motion (set_Position + cc:warp per active session)
+  - Position drift correction for paired anims
+
+re.on_draw_ui():
+  - ImGui framework menu
+  - Per-mod custom UI panels</code></pre>
+
+<h2>File Loading Order</h2>
+<p>REFramework loads autorun scripts alphabetically. CAF files load in this order:</p>
+<ol>
+  <li><code>CAF_ModAPI.lua</code> &mdash; Framework core (creates global <code>CAF</code> table)</li>
+  <li><code>CAF_re3_dodge_settings.lua</code> &mdash; Dodge settings (waits for <code>CAF</code> global)</li>
+  <li><code>CAF_test_suite.lua</code> &mdash; Test suite (if present, delete for release)</li>
+</ol>
+<p>Other mods load after and can <code>require("CAF_ModAPI/API")</code> to get the API table.</p>
+</div>
+
+<!-- ==================== ANIMATION PIPELINE ==================== -->
+<div id="animation-pipeline" class="section">
+<h1>Animation Pipeline</h1>
+<p>The journey from animation data to in-game playback involves several stages.</p>
+
+<h2>Overview</h2>
+<pre><code>Animation Source          Python Tools              Game Files
+-----------------         ----------------          ----------------
+Bone dump (.txt)    --->  dump_to_motlist.py   ---> .motlist.85
+  or Blender data   --->  mot_writer.py        ---> .motlist.85
+                          motbank_writer.py    ---> .motbank.1
+
+                    Game Runtime (CAF_ModAPI.lua)
+                    ----------------------------
+.motbank.1    ---> sdk.create_resource("via.motion.MotionBankResource")
+              ---> MotionBankResourceHolder
+              ---> DynamicMotionBank.set_MotionBank(holder)
+              ---> Motion.setDynamicMotionBank(idx, dynBank)
+              ---> TreeLayer.changeMotion(bank_id, motion_id, blend)</code></pre>
+
+<h2>Binary File Formats</h2>
+<h3>.motlist.85</h3>
+<p>Container file holding one or more animation entries. Each entry contains bone clip headers, track headers, frame indices, and keyframe data. CAF generates single-entry motlist files (one animation per file).</p>
+
+<h3>.motbank.1</h3>
+<p>Wrapper file that maps a <code>bank_id</code> to a <code>.motlist</code> resource path. The engine reads the bank_id from this file when loading. The <code>motbank_writer.py</code> tool creates these with a specified <code>--bank-id</code>.</p>
+
+<div class="note"><strong>Critical:</strong> The <code>bank_id</code> in your .motbank.1 file MUST match the <code>bank_id</code> in your manifest.json. A mismatch causes T-pose because <code>changeMotion(wrong_bank_id, ...)</code> finds no animation data.</div>
+
+<h2>Resource Path Convention</h2>
+<p>The engine uses extension-less paths internally. When you specify <code>"CAF_custom/dodge_front.motbank"</code>, the engine looks for <code>natives/x64/CAF_custom/dodge_front.motbank.1</code> on disk. Similarly, <code>.motlist</code> resolves to <code>.motlist.85</code>.</p>
+</div>
+
+<!-- ==================== PLAYBACK ENGINE ==================== -->
+<div id="playback-engine" class="section">
+<h1>Playback Engine</h1>
+<p>The PlaybackEngine manages animation sessions from start to finish.</p>
+
+<h2>Session Lifecycle</h2>
+<pre><code>API.play(anim_id)
+  |
+  v
+[LOADING] -- Bank loaded? If not, load bank, wait for resource
+  |
+  v
+[PLAYING] -- changeMotion(bank_id, motion_id, blend_frames) on target layer
+  |         -- Each frame: track engine frame, check end conditions
+  |
+  v
+[END DETECTION] -- Triple redundancy:
+  |   1. StateEndOfMotion flag on layer
+  |   2. Current frame >= known end_frame
+  |   3. Bank ID changed (another animation took over)
+  |   Plus: safety timeout (10 seconds max)
+  |
+  v
+[CLEANUP] -- Unpause FSM FIRST (critical!), reset layer speed, log</code></pre>
+
+<h2>FSM Modes</h2>
+<table>
+  <tr><th>Mode</th><th>Layer</th><th>FSM</th><th>Use Case</th></tr>
+  <tr><td><code>pause</code></td><td>0 (full body)</td><td>Paused + disabled</td><td>Full body takeover (dodge, finisher)</td></tr>
+  <tr><td><code>overlay</code></td><td>1+</td><td>Running</td><td>Upper body anim while walking</td></tr>
+  <tr><td><code>none</code></td><td>0</td><td>Running</td><td>Let game FSM manage (may override)</td></tr>
+</table>
+
+<h2>End Frame Detection</h2>
+<div class="note"><strong>Lesson learned:</strong> <code>get_EndFrame()</code> is stale immediately after <code>changeMotion()</code>. The engine hasn't loaded the new animation yet and returns the previous animation's end frame. CAF uses the known <code>end_frame</code> from the manifest and updates it after a 0.15s delay when the engine has had time to load.</div>
+
+<h2>Root Motion</h2>
+<p>When an animation has a <code>movement</code> block, the PlaybackEngine applies per-frame character translation in <code>PrepareRendering</code>:</p>
+<ol>
+  <li>Compute animation progress (current_frame / end_frame)</li>
+  <li>If within <code>start_pct</code> to <code>end_pct</code> range, calculate movement delta</li>
+  <li>Use smoothstep easing for natural acceleration/deceleration</li>
+  <li>Apply <code>Transform.set_Position()</code> + <code>CharacterController.warp()</code></li>
+  <li>Wall detection: if position didn't change after warp, stop movement (wall hit)</li>
+</ol>
+</div>
+
+<!-- ==================== EVENT SYSTEM ==================== -->
+<div id="event-system" class="section">
+<h1>Event System</h1>
+<p>CAF's EventBus is a priority-based pub/sub system that dispatches game events to registered listeners.</p>
+
+<h2>Built-in Events</h2>
+<table>
+  <tr><th>Event</th><th>Trigger</th><th>Data Fields</th></tr>
+  <tr><td><code>key_pressed</code></td><td>Key down (edge-triggered)</td><td>keycode, key_name</td></tr>
+  <tr><td><code>player_damaged</code></td><td>Player takes damage</td><td>damage, hp_before, hp_max, hp_pct</td></tr>
+  <tr><td><code>health_threshold</code></td><td>HP crosses 75/50/25%</td><td>percent, direction, hp, hp_max</td></tr>
+  <tr><td><code>enemy_proximity</code></td><td>Enemy enters/exits range (every 10 frames)</td><td>kind_id, distance, entered</td></tr>
+  <tr><td><code>animation:started</code></td><td>Session begins</td><td>session_id, anim_id</td></tr>
+  <tr><td><code>animation:completed</code></td><td>Session ends normally</td><td>session_id, anim_id</td></tr>
+</table>
+
+<h2>Priority System</h2>
+<p>Listeners with higher priority numbers fire first. If a listener returns <code>false</code>, propagation stops and lower-priority listeners do not fire. This is used by the dodge cooldown system (priority 100) to block dodge triggers during cooldown.</p>
+
+<h2>Reentrancy Protection</h2>
+<p>If an event listener emits another event, the inner event is queued in a deferred list and processed after the current dispatch completes. This prevents infinite recursion.</p>
+
+<h2>Event Bindings (Declarative)</h2>
+<p>Manifests define event bindings that automatically trigger animations:</p>
+<pre><code>"event_bindings": [
+    {
+        "animation_id": "dodge_front",
+        "event": "key_pressed",
+        "conditions": { "keycode": 86, "direction_key": "W" }
+    }
+]</code></pre>
+<p>The framework evaluates <code>conditions</code> against event data. All conditions must match for the animation to trigger.</p>
+</div>
+
+<!-- ==================== CREATING MODS ==================== -->
+<div id="creating-mods" class="section">
+<h1>Creating Mod Packages</h1>
+<p>A mod package is a folder containing a <code>manifest.json</code> and optionally companion Lua scripts. Binary animation files go in the game's <code>natives/</code> tree.</p>
+
+<h2>Folder Structure</h2>
+<pre><code>&lt;game_root&gt;/
+  reframework/data/CAF_mods/
+    my_mod/
+      manifest.json            &lt;-- Your mod definition
+  natives/x64/
+    CAF_mods/my_mod/           &lt;-- Or CAF_custom/, your choice
+      my_anim.motlist.85       &lt;-- Animation binary
+      my_anim.motbank.1        &lt;-- Bank wrapper</code></pre>
+
+<h2>Step-by-Step</h2>
+<ol>
+  <li><strong>Create animation data</strong> &mdash; Capture from game with DodgeDumperV5.lua, export from Blender, or hand-author keyframe data</li>
+  <li><strong>Convert to binary</strong> &mdash; Use <code>dump_to_motlist.py</code> or <code>mot_writer.py</code> to create .motlist.85, then <code>motbank_writer.py</code> for .motbank.1</li>
+  <li><strong>Write manifest.json</strong> &mdash; Define animations, event bindings, and metadata</li>
+  <li><strong>Place files</strong> &mdash; manifest in <code>reframework/data/CAF_mods/</code>, binaries in <code>natives/x64/</code></li>
+  <li><strong>Test</strong> &mdash; Launch game, check CAF menu for your mod, use [PLAY] buttons</li>
+</ol>
+
+<h2>Bank ID Allocation</h2>
+<table>
+  <tr><th>Range</th><th>Usage</th></tr>
+  <tr><td>0 - 899</td><td>Game's native banks (do not use)</td></tr>
+  <tr><td>900 - 903</td><td>RE3 Dodge Pack (reserved)</td></tr>
+  <tr><td>904 - 949</td><td>Manual reservation for specific mods</td></tr>
+  <tr><td>950+</td><td>Auto-assigned by framework if manifest omits bank_id</td></tr>
+</table>
+<div class="tip"><strong>Tip:</strong> Always specify <code>bank_id</code> in your manifest to avoid auto-assignment mismatches. The bank_id must match what's embedded in your .motbank.1 file.</div>
+</div>
+
+<!-- ==================== MANIFEST REF ==================== -->
+<div id="manifest-ref" class="section">
+<h1>manifest.json Reference</h1>
+
+<h2>Top-Level Fields</h2>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+  <tr><td>format_version</td><td>number</td><td>yes</td><td>Always <code>1</code></td></tr>
+  <tr><td>mod_name</td><td>string</td><td>yes</td><td>Display name</td></tr>
+  <tr><td>mod_id</td><td>string</td><td>yes</td><td>Unique ID (prefix for animation IDs)</td></tr>
+  <tr><td>author</td><td>string</td><td>yes</td><td>Author name</td></tr>
+  <tr><td>version</td><td>string</td><td>yes</td><td>Semantic version (e.g., "1.0.0")</td></tr>
+  <tr><td>description</td><td>string</td><td>no</td><td>Short description</td></tr>
+  <tr><td>game</td><td>string</td><td>no</td><td>"re2" (only supported game)</td></tr>
+  <tr><td>animations</td><td>array</td><td>yes</td><td>Array of animation definitions</td></tr>
+  <tr><td>event_bindings</td><td>array</td><td>no</td><td>Array of event binding definitions</td></tr>
+</table>
+
+<h2>Animation Definition</h2>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  <tr><td>id</td><td>string</td><td>&mdash;</td><td>Animation name (becomes "mod_id:id")</td></tr>
+  <tr><td>type</td><td>string</td><td>"single"</td><td>"single" or "paired"</td></tr>
+  <tr><td>bank_path</td><td>string</td><td>&mdash;</td><td>Path to .motbank (relative to natives/x64/)</td></tr>
+  <tr><td>bank_id</td><td>number</td><td>auto</td><td>Bank ID matching .motbank.1 content</td></tr>
+  <tr><td>motion_id</td><td>number</td><td>0</td><td>Motion index within the motlist</td></tr>
+  <tr><td>end_frame</td><td>number</td><td>179</td><td>Last frame number</td></tr>
+  <tr><td>speed</td><td>number</td><td>1.0</td><td>Playback speed multiplier</td></tr>
+  <tr><td>blend_frames</td><td>number</td><td>0</td><td>Transition blend frames</td></tr>
+  <tr><td>fsm_mode</td><td>string</td><td>"pause"</td><td>"pause", "overlay", or "none"</td></tr>
+  <tr><td>layer</td><td>number</td><td>auto</td><td>Motion layer (0=full body, 1+=overlay)</td></tr>
+  <tr><td>movement</td><td>object</td><td>null</td><td>Root motion config (see below)</td></tr>
+</table>
+
+<h2>Movement Object</h2>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  <tr><td>distance</td><td>number</td><td>2.5</td><td>Total movement distance in meters</td></tr>
+  <tr><td>direction</td><td>string</td><td>"forward"</td><td>"forward", "backward", "left", "right"</td></tr>
+  <tr><td>start_pct</td><td>number</td><td>0.01</td><td>Animation % when movement begins</td></tr>
+  <tr><td>end_pct</td><td>number</td><td>0.99</td><td>Animation % when movement ends</td></tr>
+  <tr><td>wall_detection</td><td>boolean</td><td>true</td><td>Stop movement on wall collision</td></tr>
+</table>
+
+<h2>Event Binding</h2>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+  <tr><td>animation_id</td><td>string</td><td>Matches the <code>id</code> field of an animation</td></tr>
+  <tr><td>event</td><td>string</td><td>Event name to listen for</td></tr>
+  <tr><td>conditions</td><td>object</td><td>Key-value condition checks (all must match)</td></tr>
+</table>
+
+<h3>Condition Keys</h3>
+<table>
+  <tr><th>Key</th><th>Event</th><th>Description</th></tr>
+  <tr><td>keycode</td><td>key_pressed</td><td>Virtual key code (integer)</td></tr>
+  <tr><td>direction_key</td><td>key_pressed</td><td>"W", "A", "S", or "D" (must be held)</td></tr>
+  <tr><td>damage_gt</td><td>player_damaged</td><td>Minimum damage amount</td></tr>
+  <tr><td>hp_pct_lt</td><td>player_damaged</td><td>HP percentage threshold</td></tr>
+  <tr><td>kind_id</td><td>enemy_proximity</td><td>Enemy type string (e.g., "em0000")</td></tr>
+  <tr><td>distance_lt</td><td>enemy_proximity</td><td>Maximum distance in meters</td></tr>
+</table>
+
+<h2>Complete Example</h2>
+<pre><code>{
+    "format_version": 1,
+    "mod_name": "RE3 Dodge Pack",
+    "mod_id": "re3_dodge",
+    "author": "CAF Team",
+    "version": "1.0.0",
+    "description": "Four-directional dodge rolls.",
+    "game": "re2",
+    "animations": [
+        {
+            "id": "dodge_front",
+            "type": "single",
+            "bank_path": "CAF_custom/dodge_front.motbank",
+            "bank_id": 900,
+            "motion_id": 0,
+            "end_frame": 179,
+            "speed": 2.0,
+            "blend_frames": 0,
+            "fsm_mode": "pause",
+            "movement": {
+                "distance": 2.5,
+                "direction": "forward",
+                "start_pct": 0.01,
+                "end_pct": 0.99,
+                "wall_detection": true
+            }
+        }
+    ],
+    "event_bindings": [
+        {
+            "animation_id": "dodge_front",
+            "event": "key_pressed",
+            "conditions": { "keycode": 86, "direction_key": "W" }
+        }
+    ]
+}</code></pre>
+</div>
+
+<!-- ==================== PYTHON TOOLS ==================== -->
+<div id="python-tools" class="section">
+<h1>Python Tools</h1>
+<p>Three Python scripts convert animation data into RE Engine binary format. Requires Python 3.8+.</p>
+
+<h2>dump_to_motlist.py</h2>
+<p>Converts a bone dump text file (from DodgeDumperV5.lua) into a .motlist.85 binary.</p>
+<pre><code>python dump_to_motlist.py input_dump.txt --output my_anim.motlist.85</code></pre>
+<p>Input format: one line per bone per frame, pipe-delimited:</p>
+<pre><code>T|bone_name|qx|qy|qz|qw|px|py|pz</code></pre>
+
+<h2>mot_writer.py</h2>
+<p>Full-featured .motlist.85 writer that accepts JSON animation data with per-bone keyframes.</p>
+<pre><code>python mot_writer.py input.json --output my_anim.motlist.85 --uncompressed</code></pre>
+<p>The <code>--uncompressed</code> flag uses 3-component float rotation encoding (12 bytes/key), which is proven working. Compressed encoding (4 bytes/key quantized) is also supported.</p>
+
+<h2>motbank_writer.py</h2>
+<p>Creates .motbank.1 wrapper files that pair a bank_id with a motlist resource path.</p>
+<pre><code>python motbank_writer.py \
+  --motlist-path "CAF_custom/my_anim.motlist" \
+  --bank-id 910 \
+  --output my_anim.motbank.1</code></pre>
+<div class="note"><strong>Critical:</strong> The <code>--bank-id</code> value here must match the <code>bank_id</code> field in your manifest.json. If they don't match, the animation will T-pose.</div>
+
+<h2>Supporting Tools</h2>
+<table>
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td>DodgeDumperV4.lua / V5.lua</td><td>REFramework scripts that capture bone data from running game</td></tr>
+  <tr><td>RE2BoneHashDumper.lua</td><td>Dumps RE2 skeleton bone names and hashes</td></tr>
+  <tr><td>RE3BoneHashDumper.lua</td><td>Dumps RE3 skeleton bone names and hashes</td></tr>
+  <tr><td>resolve_bone_names.py</td><td>Maps bone hashes to names using known mappings</td></tr>
+  <tr><td>blender_anim_exporter.py</td><td>Exports Blender animation data in CAF-compatible format</td></tr>
+  <tr><td>validate_against_real.py</td><td>Compares generated binaries against real game files</td></tr>
+</table>
+</div>
+
+<!-- ==================== CHAINS ==================== -->
+<div id="chains" class="section">
+<h1>Chains &amp; Combos</h1>
+<p>The chain system enables multi-step animation sequences where the player can advance to the next step by pressing a trigger within a timing window.</p>
+
+<h2>Registering a Chain</h2>
+<pre><code>CAF.registerChain("my_combo", {
+    steps = {
+        { anim_id = "my_mod:attack_1", input_window = 0.5 },
+        { anim_id = "my_mod:attack_2", input_window = 0.4 },
+        { anim_id = "my_mod:attack_3" },  -- no window = chain ends
+    },
+    trigger_event = "key_pressed",
+    trigger_conditions = { keycode = 0x47 },  -- G key
+})</code></pre>
+
+<h2>How It Works</h2>
+<ol>
+  <li>Player presses G &mdash; Step 1 animation plays</li>
+  <li>During Step 1 playback, if player presses G again within <code>input_window</code> seconds, the input is buffered</li>
+  <li>When Step 1 ends, the buffered input triggers Step 2</li>
+  <li>If no input is buffered when a step ends, the chain resets to idle</li>
+  <li>The last step has no <code>input_window</code>, so the chain always ends after it</li>
+</ol>
+
+<h2>Chain State Machine</h2>
+<pre><code>IDLE ---(trigger press)---> STEP_1_PLAYING ---(step ends + buffered input)---> STEP_2_PLAYING
+                                    |                                                |
+                              (no buffered input)                              (step ends)
+                                    |                                                |
+                                    v                                                v
+                                  IDLE                                             IDLE</code></pre>
+
+<div class="tip"><strong>Tip:</strong> The trigger keycode is automatically added to the framework's watched keys list when you call <code>registerChain()</code>. You don't need to manually add it.</div>
+</div>
+
+<!-- ==================== CUSTOM UI ==================== -->
+<div id="custom-ui" class="section">
+<h1>Custom Mod UI</h1>
+<p>Mods can register custom ImGui panels that appear in the CAF menu under their mod's section.</p>
+
+<h2>Registering a UI Panel</h2>
+<pre><code>CAF.registerModUI("my_mod", function(mod_id)
+    local changed, value
+    changed, value = imgui.slider_float("Speed##mymod", current_speed, 0.5, 5.0)
+    if changed then current_speed = value end
+
+    changed, value = imgui.checkbox("Enable feature##mymod", feature_on)
+    if changed then feature_on = value end
+end)</code></pre>
+
+<h2>Best Practices</h2>
+<ul>
+  <li>Always suffix ImGui widget IDs with <code>##your_mod_id</code> to avoid ID collisions</li>
+  <li>Use <code>imgui.slider_float</code>, <code>imgui.checkbox</code>, <code>imgui.button</code> &mdash; standard REFramework ImGui widgets</li>
+  <li>Do NOT use <code>imgui.radio_button</code> (does not exist in REFramework)</li>
+  <li>Save settings via <code>json.dump_file()</code> with debounced auto-save</li>
+  <li>Apply settings to animation defs in real-time using <code>CAF.getAnimation(anim_id)</code></li>
+</ul>
+
+<h2>Settings Persistence Pattern</h2>
+<pre><code>local dirty = false
+local dirty_time = 0
+
+-- In UI callback, when a value changes:
+dirty = true
+dirty_time = os.clock()
+
+-- In re.on_frame:
+if dirty and os.clock() - dirty_time > 0.5 then
+    json.dump_file("my_settings.json", settings)
+    dirty = false
+end</code></pre>
+</div>
+
+<!-- ==================== API PLAYBACK ==================== -->
+<div id="api-playback" class="section">
+<h1>Playback API</h1>
+<p>Access via the global <code>CAF</code> table or <code>require("CAF_ModAPI/API")</code>.</p>
+
+<h3>CAF.play(anim_id)</h3>
+<p>Plays a registered animation. Returns a session ID (number) or nil on failure.</p>
+<pre><code>local sid = CAF.play("re3_dodge:dodge_front")
+if sid then log.info("Playing session #" .. sid) end</code></pre>
+
+<h3>CAF.stop(session_id)</h3>
+<p>Stops an active animation session and triggers cleanup (FSM restore, layer reset).</p>
+<pre><code>CAF.stop(sid)</code></pre>
+
+<h3>CAF.loadBank(bank_path, bank_id)</h3>
+<p>Manually loads a DynamicMotionBank. Usually handled automatically by the mod loader.</p>
+<pre><code>CAF.loadBank("CAF_custom/my_anim.motbank", 910)</code></pre>
+
+<h3>CAF.isReady()</h3>
+<p>Returns <code>true</code> if the framework is initialized and the player is cached.</p>
+</div>
+
+<!-- ==================== API EVENTS ==================== -->
+<div id="api-events" class="section">
+<h1>Event API</h1>
+
+<h3>CAF.on(event_name, callback, priority)</h3>
+<p>Registers an event listener. Returns a listener ID for later removal.</p>
+<pre><code>local lid = CAF.on("player_damaged", function(data)
+    log.info("Took " .. data.damage .. " damage!")
+end, 50)  -- priority 50</code></pre>
+
+<h3>CAF.off(event_name, listener_id)</h3>
+<p>Removes a previously registered listener.</p>
+<pre><code>CAF.off("player_damaged", lid)</code></pre>
+
+<h3>CAF.emit(event_name, data)</h3>
+<p>Emits a custom event. All registered listeners for that event are called in priority order.</p>
+<pre><code>CAF.emit("my_mod:custom_event", { value = 42 })</code></pre>
+
+<h3>CAF.bindEvent(anim_id, event_name, options)</h3>
+<p>Declaratively binds an animation to an event with conditions.</p>
+<pre><code>CAF.bindEvent("my_mod:my_anim", "key_pressed", {
+    conditions = { keycode = 0x48 },  -- H key
+})</code></pre>
+</div>
+
+<!-- ==================== API REGISTRATION ==================== -->
+<div id="api-registration" class="section">
+<h1>Registration API</h1>
+
+<h3>CAF.registerAnimation(id, def)</h3>
+<p>Registers a new animation definition at runtime.</p>
+<pre><code>CAF.registerAnimation("my_mod:special_move", {
+    type = "single",
+    bank_path = "CAF_mods/my_mod/special.motbank",
+    bank_id = 920,
+    motion_id = 0,
+    end_frame = 90,
+    speed = 1.5,
+    fsm_mode = "pause",
+})</code></pre>
+
+<h3>CAF.getAnimation(anim_id)</h3>
+<p>Returns the animation definition table, which can be modified in-place to change settings at runtime.</p>
+<pre><code>local def = CAF.getAnimation("re3_dodge:dodge_front")
+def.speed = 3.0  -- Changes take effect on next play()</code></pre>
+
+<h3>CAF.registerChain(id, def)</h3>
+<p>Registers a combo chain. See <a href="#chains" onclick="show('chains')">Chains &amp; Combos</a>.</p>
+
+<h3>CAF.registerModUI(mod_id, draw_fn)</h3>
+<p>Registers a custom UI panel. See <a href="#custom-ui" onclick="show('custom-ui')">Custom Mod UI</a>.</p>
+
+<h3>CAF.getModSettings(mod_id) / CAF.setModSettings(mod_id, settings)</h3>
+<p>Get/set the settings table for a registered mod.</p>
+</div>
+
+<!-- ==================== API UTILITIES ==================== -->
+<div id="api-utilities" class="section">
+<h1>Utilities API</h1>
+
+<h3>CAF.getPlayer()</h3>
+<p>Returns the cached player managed object, or nil if not yet cached.</p>
+
+<h3>CAF.getPlayerMotion()</h3>
+<p>Returns the player's <code>via.motion.Motion</code> component.</p>
+
+<h3>CAF.getPlayerTransform()</h3>
+<p>Returns the player's <code>via.Transform</code> component.</p>
+
+<h3>CAF.getEnemies()</h3>
+<p>Returns an array of nearby enemy info tables:</p>
+<pre><code>local enemies = CAF.getEnemies()
+for _, e in ipairs(enemies) do
+    log.info(e.kind_id .. " at " .. e.distance .. "m")
+end
+-- Each entry: { game_object, kind_id, distance, position }</code></pre>
+</div>
+
+<!-- ==================== BINARY FORMAT ==================== -->
+<div id="binary-format" class="section">
+<h1>Binary Format Reference (.motlist.85)</h1>
+<p>RE2 Remake uses .motlist.85 container files. Each contains a motlist header, entry pointer table, and one or more mot entries.</p>
+
+<h2>Motlist Header</h2>
+<pre><code>Offset  Size  Type    Field
+0x00    4B    uint32  version (85)
+0x04    4B    char[4] magic ("mlst")
+0x08    8B    uint64  padding (0)
+0x10    8B    uint64  pointersOffs
+0x18    8B    uint64  colOffs
+0x20    8B    uint64  motlistNameOffs
+0x28    8B    uint64  padding (0)
+0x30    4B    uint32  numOffs (entry count)
+0x34    var   UTF16LE name string</code></pre>
+
+<h2>Mot Entry Header (0x74 bytes)</h2>
+<pre><code>0x00  uint32   mot_version (65 for RE2)
+0x04  char[4]  magic ("mot ")
+0x10  uint64   offsToBoneHdrOffs (MUST be non-zero!)
+0x18  uint64   boneClipHdrOffs
+0x58  float32  frameCount
+0x68  uint16   boneCount
+0x6A  uint16   boneClipCount
+0x6E  uint16   frameRate</code></pre>
+
+<h2>Track Flags (RE2)</h2>
+<table>
+  <tr><th>Flag</th><th>Encoding</th><th>Bytes/Key</th></tr>
+  <tr><td>0x004B0112</td><td>3-Component float rotation (W reconstructed)</td><td>12</td></tr>
+  <tr><td>0x00430112</td><td>10-bit packed quaternion XYZ</td><td>4</td></tr>
+  <tr><td>0x004000F2</td><td>Uncompressed position (3 floats)</td><td>12</td></tr>
+</table>
+
+<div class="note"><strong>All internal offsets are mot-entry-relative</strong>, not file-relative. This is critical for both reading and writing.</div>
+
+<p>For the complete binary format specification, see <code>docs/mot_format_specification.md</code> in the Git repository.</p>
+</div>
+
+<!-- ==================== DYNAMICMOTIONBANK ==================== -->
+<div id="dynamicmotionbank" class="section">
+<h1>DynamicMotionBank Loading</h1>
+<p>The RE Engine's <code>via.motion.DynamicMotionBank</code> class allows loading custom animation banks at runtime.</p>
+
+<h2>Loading Pipeline</h2>
+<pre><code>1. resource = sdk.create_resource("via.motion.MotionBankResource", path)
+2. resource:add_ref()
+3. holder = sdk.create_instance("via.motion.MotionBankResourceHolder", true):add_ref()
+4. holder:call("set_ResourcePath", path)
+5. holder:call("set_Resource", resource)
+6. dyn_bank = sdk.create_instance("via.motion.DynamicMotionBank", true):add_ref()
+7. dyn_bank:call("set_MotionBank", holder)
+8. dyn_bank:call("set_Priority", 200)
+9. motion = player:call("getComponent(System.Type)", sdk.typeof("via.motion.Motion"))
+10. count = motion:call("getDynamicMotionBankCount")
+11. motion:call("setDynamicMotionBankCount", count + 1)
+12. motion:call("setDynamicMotionBank", count, dyn_bank)</code></pre>
+
+<div class="note"><strong>Critical distinction:</strong> <code>via.motion.DynamicMotionBank</code> is NOT the same as <code>via.motion.MotionBank</code>. They are separate classes with different APIs. DynamicMotionBank has <code>set_MotionBank(holder)</code>, <code>set_Priority</code>, <code>set_Order</code>. MotionBank has <code>set_BankID</code>, <code>set_MotionList</code> &mdash; different class entirely.</div>
+
+<h2>Playing the Animation</h2>
+<pre><code>local layer = motion:call("getLayer", 0)  -- or getLayer(1) for overlay
+layer:call("changeMotion", bank_id, motion_id, blend_frames)</code></pre>
+
+<h2>Key Insights</h2>
+<ul>
+  <li>The bank_id is embedded in the .motbank.1 file, NOT set via API</li>
+  <li>Resource paths use extension-less format (".motbank" not ".motbank.1")</li>
+  <li>FSM does NOT override changeMotion() on layer 0 &mdash; no StopUpdate needed</li>
+  <li>Works on any actor with a Motion component (player AND enemies)</li>
+  <li>Priority 200 ensures custom banks override game banks with lower priority</li>
+</ul>
+</div>
+
+<!-- ==================== FSM CONTROL ==================== -->
+<div id="fsm-control" class="section">
+<h1>FSM Control</h1>
+<p>RE2's <code>via.motion.MotionFsm2</code> manages the game's animation state machine. For full-body custom animations, we pause it to prevent the game from overriding our animation.</p>
+
+<h2>Pause/Unpause Pattern</h2>
+<pre><code>-- Pause (belt-and-suspenders approach):
+fsm2:call("set_Paused", true)
+fsm2:call("set_Enabled", false)
+
+-- Unpause (MUST happen before any logging that might crash):
+fsm2:call("set_Enabled", true)
+fsm2:call("set_Paused", false)</code></pre>
+
+<div class="note"><strong>Critical lesson:</strong> In cleanup code, restore FSM FIRST, log SECOND. If logging crashes (e.g., string.format with wrong specifier), the FSM stays permanently paused and the character freezes.</div>
+
+<h2>When to Pause FSM</h2>
+<ul>
+  <li><code>fsm_mode = "pause"</code> &mdash; Full body takeover (dodge, finisher animations)</li>
+  <li><code>fsm_mode = "overlay"</code> &mdash; Do NOT pause. Animation plays on layer 1+, FSM runs normally on layer 0</li>
+  <li><code>fsm_mode = "none"</code> &mdash; Do NOT pause. Game FSM may override the animation</li>
+</ul>
+
+<h2>Accessing MotionFsm2</h2>
+<p>CAF uses 4 fallback strategies to find the FSM:</p>
+<ol>
+  <li><code>getComponent("via.motion.MotionFsm2")</code> on player GameObject</li>
+  <li>Search child GameObjects for MotionFsm2 component</li>
+  <li>Access via PlayerController fields</li>
+  <li>Access via Motion component's parent chain</li>
+</ol>
+</div>
+
+<!-- ==================== BONE MAPPING ==================== -->
+<div id="bone-mapping" class="section">
+<h1>Bone Mapping</h1>
+<p>RE Engine uses MurmurHash3-32 (seed 0xFFFFFFFF) on UTF-16LE bone names for bone identification.</p>
+
+<h2>Known Bone Names</h2>
+<table>
+  <tr><th>Hash</th><th>Name</th><th>Role</th></tr>
+  <tr><td>0xABA7DE3C</td><td>root</td><td>Root transform</td></tr>
+  <tr><td>0x5DCE2C70</td><td>Null_Offset</td><td>Null offset node</td></tr>
+  <tr><td>0xCC3297EA</td><td>COG</td><td>Center of gravity</td></tr>
+  <tr><td>0xA6993368</td><td>hips</td><td>Hip joint</td></tr>
+  <tr><td>0x31838B82</td><td>spine_0</td><td>Lower spine</td></tr>
+  <tr><td>0x80973DA1</td><td>spine_1</td><td>Middle spine</td></tr>
+  <tr><td>0xB344F241</td><td>spine_2</td><td>Upper spine</td></tr>
+  <tr><td>0xD2D4DEFA</td><td>neck_0</td><td>Lower neck</td></tr>
+  <tr><td>0x00A6D31D</td><td>neck_1</td><td>Upper neck</td></tr>
+  <tr><td>0x2BF882E3</td><td>head</td><td>Head</td></tr>
+</table>
+
+<h2>Cross-Game Compatibility</h2>
+<p>88 bone hashes are shared between RE2 and RE3 skeletons. The RE3 dodge animations use these shared bones, which is why they play correctly on RE2 characters. 49 RE3-specific bones (Jill's hair, clothing) have no RE2 equivalent and are simply ignored.</p>
+</div>
+
+<!-- ==================== DEV HISTORY ==================== -->
+<div id="dev-history" class="section">
+<h1>Development History</h1>
+
+<h2>Phase A: Research (Complete)</h2>
+<p>Analyzed 30+ Python reverse-engineering scripts, RE2/RE3 il2cpp dumps, existing mod examples. Produced 10 research documents covering the .motlist binary format, animation system architecture, bone mapping, and paired animation systems.</p>
+
+<h2>Phase B Track 1: Bone Override Dodge (v1.0 - v1.4)</h2>
+<ul>
+  <li><strong>v1.0</strong> &mdash; Initial bone override approach. Parsed RE3 dodge dump, applied transforms in PrepareRendering. Field order bug and index space mismatch.</li>
+  <li><strong>v1.1</strong> &mdash; Fixed parsing, named format, COG position, 10 bones working.</li>
+  <li><strong>v1.2</strong> &mdash; 80 bones via DodgeDumperV4, FPS slider. Movement didn't work (no CC warp).</li>
+  <li><strong>v1.3</strong> &mdash; Frame-locked playback, rotation-based forward direction, CharacterController warp(), synced timing, wall collision.</li>
+  <li><strong>v1.4</strong> &mdash; Multidirectional dodge (4 directions), WASD+V input, per-direction animation data.</li>
+</ul>
+
+<h2>Phase B Track 2: DynamicMotionBank System (v1.0 - v3.0)</h2>
+<ul>
+  <li><strong>Phase 1</strong> &mdash; Proved DynamicMotionBank loading works on player</li>
+  <li><strong>Phase 2</strong> &mdash; Extended to enemies (via.motion.Motion is engine-level)</li>
+  <li><strong>Phase 3</strong> &mdash; Paired animation system: 2-6 actors, position alignment, frame-locked sync, AI suspension</li>
+</ul>
+
+<h2>Phase 4a: Blender JSON to Lua Bone Override</h2>
+<p>Built and tested pipeline from Blender animation export to in-game bone override playback.</p>
+
+<h2>Phase 4b: Python .mot Writer</h2>
+<p>Built complete pipeline to generate RE Engine .motlist.85 and .motbank.1 binary files from animation data. Six major bugs fixed over multiple iterations (header offsets, track offsets, frame indices, rotation encoding, collection data, BoneHeaders inner offset). Proven working with uncompressed 3-component float rotation.</p>
+
+<h2>Phase 5: CAF Mod API v1.0.0 (Current)</h2>
+<p>Built the full mod API framework: EventBus, mod package auto-discovery, animation playback engine, root motion, layer overlays, chain/combo system, per-mod settings UI. All features verified in-game.</p>
+
+<h3>Bugs Fixed During Phase 5</h3>
+<ul>
+  <li><strong>T-pose on dodge</strong> &mdash; manifest.json missing bank_id fields; auto-assigned 950+ didn't match .motbank.1's 900-903</li>
+  <li><strong>Keys not detected</strong> &mdash; Missing pcall protection around chain/event dispatch; one crash silently killed the entire input loop</li>
+  <li><strong>Chain combo silent fail</strong> &mdash; Lua forward declaration bug. <code>check_chain_triggers</code> defined in section 18 but called from section 16. Needed <code>local check_chain_triggers</code> forward declaration before the calling function.</li>
+</ul>
+</div>
+
+<!-- ==================== LESSONS LEARNED ==================== -->
+<div id="lessons-learned" class="section">
+<h1>Lessons Learned</h1>
+<p>Hard-won knowledge from building CAF. These are the things that cost hours of debugging.</p>
+
+<h2>REFramework / Lua 5.4</h2>
+<ul>
+  <li><strong>NEVER use <code>%d</code> in string.format</strong> &mdash; Lua 5.4 rejects floats with <code>%d</code>. Always use <code>%.0f</code> for integers. This caused 3 separate crashes.</li>
+  <li><strong><code>imgui.radio_button</code> does NOT exist</strong> in REFramework's ImGui bindings. Use regular buttons.</li>
+  <li><strong>REFramework CWD is <code>reframework/data/</code></strong> &mdash; All file paths (json.load_file, etc.) are relative to that.</li>
+  <li><strong>Forward declarations matter</strong> &mdash; <code>local function foo()</code> is only visible to code AFTER it. If function A calls function B which is defined later, add <code>local B</code> before A, then <code>B = function() ... end</code> later.</li>
+  <li><strong>pcall everything in event loops</strong> &mdash; One unprotected crash in a key handler kills the entire input system silently.</li>
+</ul>
+
+<h2>RE Engine Animation System</h2>
+<ul>
+  <li><strong><code>get_EndFrame()</code> is stale after <code>changeMotion()</code></strong> &mdash; Engine hasn't loaded the new anim yet. Use known value, update after 0.15s delay.</li>
+  <li><strong><code>get_Forward()</code> does NOT exist on via.Transform</strong> &mdash; Compute forward from rotation quaternion manually.</li>
+  <li><strong><code>CharacterController.warp()</code> is REQUIRED</strong> after <code>set_Position()</code> to persist position changes. Without it, the physics system snaps the character back.</li>
+  <li><strong>Layer speed persists</strong> &mdash; Always reset to 1.0 in session cleanup.</li>
+  <li><strong>FSM does NOT override <code>changeMotion()</code></strong> on layer 0 &mdash; No StopUpdate needed.</li>
+  <li><strong>DynamicMotionBank != MotionBank</strong> &mdash; Completely separate classes with different APIs.</li>
+</ul>
+
+<h2>Binary Format</h2>
+<ul>
+  <li><strong>Mot header +0x10 MUST be non-zero</strong> &mdash; Points to BoneHeaders. If zero, engine crashes.</li>
+  <li><strong>Frame indices are REQUIRED</strong> even for single-key tracks.</li>
+  <li><strong>Bank ID is embedded in .motbank.1</strong>, not set via API. Must match manifest.</li>
+  <li><strong>Resource paths use extension-less format</strong> &mdash; ".motbank" on disk is ".motbank.1".</li>
+  <li><strong>Always rebuild + redeploy after code changes</strong> &mdash; Stale files caused days of debugging.</li>
+</ul>
+
+<h2>Development Process</h2>
+<ul>
+  <li><strong>Restore FSM FIRST, log SECOND</strong> in cleanup code. If logging crashes, FSM stays permanently disabled.</li>
+  <li><strong>Manifest bank_id must match .motbank.1 file</strong> &mdash; Auto-assign gives wrong ID if omitted.</li>
+  <li><strong>Single-file Lua scripts</strong> are the proven REFramework pattern. Keep it simple.</li>
+  <li><strong>Frame-locked playback</strong> (1 dump frame per game frame) auto-syncs with any framerate.</li>
+</ul>
+</div>
+
+<!-- ==================== TROUBLESHOOTING ==================== -->
+<div id="troubleshooting" class="section">
+<h1>Troubleshooting</h1>
+
+<h2>T-Pose When Animation Triggers</h2>
+<p><strong>Cause:</strong> Bank ID mismatch. The <code>bank_id</code> in manifest.json doesn't match what's embedded in the .motbank.1 file.</p>
+<p><strong>Fix:</strong> Check your manifest's <code>bank_id</code> and the <code>--bank-id</code> you used with motbank_writer.py. They must be identical.</p>
+
+<h2>Keys Don't Work / Input Not Detected</h2>
+<p><strong>Cause:</strong> An unprotected crash in the key handling loop. One error silently kills all input processing.</p>
+<p><strong>Fix:</strong> Check <code>re2_framework_log.txt</code> for <code>[CAF]</code> error messages. If you're writing a Lua mod, wrap key-related callbacks in pcall.</p>
+
+<h2>Animation Plays But No Movement</h2>
+<p><strong>Cause:</strong> Missing <code>movement</code> block in manifest, or root motion disabled in settings.</p>
+<p><strong>Fix:</strong> Add a <code>movement</code> object to your animation definition with <code>distance</code>, <code>direction</code>, <code>start_pct</code>, <code>end_pct</code>.</p>
+
+<h2>Mod Not Showing in CAF Menu</h2>
+<p><strong>Cause:</strong> manifest.json is in the wrong folder or has JSON syntax errors.</p>
+<p><strong>Fix:</strong> Ensure it's at <code>reframework/data/CAF_mods/your_mod_id/manifest.json</code>. Validate JSON syntax. Check log for parse errors.</p>
+
+<h2>Character Stuck / Frozen After Animation</h2>
+<p><strong>Cause:</strong> FSM not properly restored. Usually from a crash during cleanup.</p>
+<p><strong>Fix:</strong> Restart the game. If it persists, check for Lua errors in the log. The framework is designed to restore FSM before logging to prevent this.</p>
+
+<h2>Game Crashes on Load</h2>
+<p><strong>Cause:</strong> Malformed .motlist.85 or .motbank.1 binary. Specifically, mot header +0x10 (offsToBoneHdrOffs) must be non-zero.</p>
+<p><strong>Fix:</strong> Regenerate your binary files with the latest version of the Python tools. Run validate_against_real.py to compare structure.</p>
+
+<h2>Checking Logs</h2>
+<p>All CAF messages are prefixed with <code>[CAF]</code>. Search the log file:</p>
+<pre><code># In the game folder:
+re2_framework_log.txt
+
+# Search for CAF entries:
+grep "[CAF]" re2_framework_log.txt</code></pre>
+</div>
+
+</main>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('#sidebar a').forEach(a => a.classList.remove('active'));
+  const section = document.getElementById(id);
+  if (section) section.classList.add('active');
+  const link = document.querySelector('#sidebar a[href="#' + id + '"]');
+  if (link) link.classList.add('active');
+  window.scrollTo(0, 0);
+}
+// Handle hash on load
+if (window.location.hash) {
+  const id = window.location.hash.substring(1);
+  show(id);
+} else {
+  show('overview');
+}
+</script>
+</body>
+</html>
