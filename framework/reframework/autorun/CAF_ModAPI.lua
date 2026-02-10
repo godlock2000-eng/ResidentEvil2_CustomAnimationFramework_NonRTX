@@ -122,6 +122,7 @@ local settings_dirty_time = 0
 local prev_hp_pct = 1.0
 local prev_weapon_type = -1
 local prev_keys = {}                 -- { [keycode] = was_down }
+local prev_pad_buttons = 0           -- previous frame pad button bitmask
 local enemy_scan_counter = 0
 local prev_enemy_proximity = {}      -- { [enemy_go_ptr] = was_near }
 local enemy_cache = {}               -- cached enemy list from scan
@@ -143,6 +144,8 @@ local CFG = {
     health_thresholds = { 0.75, 0.50, 0.25, 0.10 },
     max_concurrent = MAX_SESSIONS,
     watched_keys = {},               -- { keycode, ... } — auto-populated from event bindings
+    pad_button_map = {},             -- { [keycode] = pad_button_flag } — pad buttons that alias to keycodes
+    pad_stick_deadzone = 0.5,        -- left stick deadzone for direction_key checks
 }
 
 --------------------------------------------------------------------------------
@@ -504,6 +507,21 @@ local function get_gamepad()
     end)
     if ok and pad then cached_pad = pad; cached_pad_time = now end
     return ok and pad or nil
+end
+
+local function get_pad_buttons()
+    local pad = get_gamepad()
+    if not pad then return 0 end
+    local ok, b = pcall(function() return pad:call("get_Button") end)
+    return (ok and b) and (tonumber(b) or 0) or 0
+end
+
+local function get_pad_stick_l()
+    local pad = get_gamepad()
+    if not pad then return 0, 0 end
+    local ok, axis = pcall(function() return pad:call("get_AxisL") end)
+    if ok and axis then return axis.x or 0, axis.y or 0 end
+    return 0, 0
 end
 
 --------------------------------------------------------------------------------
@@ -1203,10 +1221,21 @@ local function check_conditions(conditions, data)
         elseif key == "weapon_type" then
             if data.weapon_type ~= expected then return false end
         elseif key == "direction_key" then
-            -- Check if a WASD key is also pressed
+            -- Check if a WASD key is also pressed OR left stick is in that direction
             local dir_keys = { W = 0x57, A = 0x41, S = 0x53, D = 0x44 }
             local dk = dir_keys[expected]
-            if dk and not is_key_down(dk) then return false end
+            local kb_held = dk and is_key_down(dk)
+            local stick_held = false
+            local sx, sy = get_pad_stick_l()
+            local mag = math.sqrt(sx * sx + sy * sy)
+            if mag > CFG.pad_stick_deadzone then
+                if expected == "W" then stick_held = sy > 0 and math.abs(sy) >= math.abs(sx)
+                elseif expected == "S" then stick_held = sy < 0 and math.abs(sy) >= math.abs(sx)
+                elseif expected == "A" then stick_held = sx < 0 and math.abs(sx) > math.abs(sy)
+                elseif expected == "D" then stick_held = sx > 0 and math.abs(sx) > math.abs(sy)
+                end
+            end
+            if not kb_held and not stick_held then return false end
         end
     end
     return true
@@ -1331,6 +1360,26 @@ local function poll_events()
         end
         prev_keys[keycode] = down
     end
+
+    -- Gamepad button detection (edge-triggered, fires key_pressed for mapped buttons)
+    local cur_pad = get_pad_buttons()
+    for keycode, pad_flag in pairs(CFG.pad_button_map) do
+        if pad_flag > 0 then
+            local now_pressed = (cur_pad & pad_flag) ~= 0
+            local was_pressed = (prev_pad_buttons & pad_flag) ~= 0
+            if now_pressed and not was_pressed then
+                local consumed = false
+                local chain_ok, chain_result = pcall(check_chain_triggers, keycode)
+                if chain_ok then consumed = chain_result end
+                if not consumed then
+                    local data = { keycode = keycode, key_name = "PAD", pad_button = pad_flag }
+                    pcall(EventBus.emit, "key_pressed", data)
+                    pcall(dispatch_event_animations, "key_pressed", data)
+                end
+            end
+        end
+    end
+    prev_pad_buttons = cur_pad
 
     -- Enemy proximity (throttled)
     enemy_scan_counter = enemy_scan_counter + 1
@@ -1994,6 +2043,25 @@ CAF = {
 
     getAnimation = function(anim_id)
         return Registry.animations[anim_id]
+    end,
+
+    -- Gamepad helpers
+    getPadButtons = function()
+        return get_pad_buttons()
+    end,
+
+    getPadStickL = function()
+        return get_pad_stick_l()
+    end,
+
+    mapPadButton = function(keycode, pad_flag)
+        CFG.pad_button_map[keycode] = pad_flag
+        dbg("API: mapped pad button 0x" .. string.format("%X", pad_flag) ..
+            " to keycode 0x" .. string.format("%02X", keycode))
+    end,
+
+    setPadDeadzone = function(deadzone)
+        CFG.pad_stick_deadzone = deadzone
     end,
 }
 

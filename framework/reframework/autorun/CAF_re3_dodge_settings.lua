@@ -17,6 +17,8 @@ local settings = {
     move_start = 0.01,
     move_end = 0.99,
     dodge_key = 0x56,          -- V
+    dodge_pad_button = 0,      -- pad button bitmask (0 = none)
+    pad_stick_deadzone = 0.5,
     debug_log = false,
     move_enabled = true,
 }
@@ -99,6 +101,8 @@ local KB_KEY_NAMES = {
 }
 
 local rebinding = false
+local pad_rebinding = false
+local pad_prev_buttons = 0
 local SCANNABLE_KEYS = {}
 for kc, _ in pairs(KB_KEY_NAMES) do
     if kc ~= 0 then table.insert(SCANNABLE_KEYS, kc) end
@@ -162,6 +166,54 @@ local function try_register()
             end
         end
 
+        -- Pad button rebind
+        if pad_rebinding then
+            imgui.text("Press any pad button...")
+            if CAF and CAF.getPadButtons then
+                local cur = CAF.getPadButtons()
+                local new_btns = cur & (~pad_prev_buttons)
+                if new_btns > 0 then
+                    local f = 1
+                    while f <= new_btns do
+                        if (new_btns & f) ~= 0 then
+                            settings.dodge_pad_button = f
+                            break
+                        end
+                        f = f << 1
+                    end
+                    pad_rebinding = false
+                    changed = true
+                    if CAF.mapPadButton then
+                        CAF.mapPadButton(settings.dodge_key, settings.dodge_pad_button)
+                    end
+                end
+                pad_prev_buttons = cur
+            end
+        else
+            local pad_label = settings.dodge_pad_button > 0
+                and string.format("0x%X", settings.dodge_pad_button) or "None"
+            if imgui.button("Pad button: " .. pad_label .. "##pad_rebind") then
+                pad_rebinding = true
+                pad_prev_buttons = (CAF and CAF.getPadButtons) and CAF.getPadButtons() or 0
+            end
+            imgui.same_line()
+            if settings.dodge_pad_button > 0 and imgui.button("Clear##pad_clear") then
+                settings.dodge_pad_button = 0
+                changed = true
+                if CAF and CAF.mapPadButton then
+                    CAF.mapPadButton(settings.dodge_key, 0)
+                end
+            end
+        end
+
+        -- Stick deadzone
+        c, v = imgui.slider_float("Stick deadzone##dodge", settings.pad_stick_deadzone, 0.1, 0.9, "%.2f")
+        if c then
+            settings.pad_stick_deadzone = v
+            changed = true
+            if CAF and CAF.setPadDeadzone then CAF.setPadDeadzone(v) end
+        end
+
         -- Debug
         c, settings.debug_log = imgui.checkbox("Debug log##dodge", settings.debug_log)
         if c then changed = true end
@@ -175,6 +227,14 @@ local function try_register()
 
     -- Apply initial settings
     apply_settings()
+
+    -- Register pad button mapping and deadzone
+    if settings.dodge_pad_button > 0 and CAF.mapPadButton then
+        CAF.mapPadButton(settings.dodge_key, settings.dodge_pad_button)
+    end
+    if CAF.setPadDeadzone then
+        CAF.setPadDeadzone(settings.pad_stick_deadzone)
+    end
 
     -- Set up cooldown enforcement via event listener
     CAF.on("animation:started", function(data)
