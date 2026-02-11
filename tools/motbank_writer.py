@@ -20,7 +20,7 @@ RE2 motbank format (version 1):
     +0x14: u32 reserved = 0
 
 Usage:
-    python motbank_writer.py <motlist_path> <output.motbank.1> [--bank-id N]
+    python motbank_writer.py <motlist_path> <output.motbank.1> [--bank-id N] [--layer-mask MASK]
 """
 
 import struct
@@ -33,12 +33,13 @@ def align_up(value, alignment):
     return (value + alignment - 1) & ~(alignment - 1)
 
 
-def build_motbank(motlist_paths, bank_ids=None):
+def build_motbank(motlist_paths, bank_ids=None, layer_masks=None):
     """Build a RE2 v1 .motbank.1 file.
 
     Args:
         motlist_paths: List of motlist resource paths (e.g., "CAF_custom/dodge_front.motlist")
         bank_ids: List of bank IDs per entry (default: [0, 0, ...])
+        layer_masks: List of layer masks per entry (default: [0, 0, ...])
 
     Returns:
         Complete .motbank.1 file as bytes.
@@ -46,6 +47,8 @@ def build_motbank(motlist_paths, bank_ids=None):
     num_entries = len(motlist_paths)
     if bank_ids is None:
         bank_ids = [0] * num_entries
+    if layer_masks is None:
+        layer_masks = [0] * num_entries
 
     # Header is 0x24 bytes, then pad to 16-byte alignment
     header_size = 0x24
@@ -89,7 +92,7 @@ def build_motbank(motlist_paths, bank_ids=None):
         struct.pack_into('<Q', buf, e_off + 0, string_offsets[i])
         struct.pack_into('<I', buf, e_off + 8, bank_ids[i])
         struct.pack_into('<I', buf, e_off + 12, 0)  # weapon_id
-        struct.pack_into('<I', buf, e_off + 16, 0)  # layer_mask
+        struct.pack_into('<I', buf, e_off + 16, layer_masks[i])  # layer_mask
         struct.pack_into('<I', buf, e_off + 20, 0)  # reserved
 
     # String data
@@ -108,10 +111,12 @@ def main():
                         help="Output .motbank.1 file path")
     parser.add_argument("--bank-id", type=int, default=0,
                         help="Bank ID for the motlist entry (default: 0)")
+    parser.add_argument("--layer-mask", type=lambda x: int(x, 0), default=0,
+                        help="Layer mask for the motlist entry (default: 0, supports hex like 0xFFFFFFFF)")
 
     args = parser.parse_args()
 
-    data = build_motbank([args.motlist_path], [args.bank_id])
+    data = build_motbank([args.motlist_path], [args.bank_id], [args.layer_mask])
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, 'wb') as f:
@@ -121,6 +126,7 @@ def main():
     print(f"  Version: 1, Entries: 1")
     print(f"  Motlist: {args.motlist_path}")
     print(f"  BankID: {args.bank_id}")
+    print(f"  LayerMask: 0x{args.layer_mask:08X}")
 
 
 if __name__ == '__main__':

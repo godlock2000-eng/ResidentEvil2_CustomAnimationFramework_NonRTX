@@ -52,6 +52,10 @@ Open `wiki/index.html` in a browser for the full wiki, covering:
 - Technical reference (binary format, DynamicMotionBank, FSM control, bone mapping)
 - Development history and lessons learned
 
+Quick modder path:
+- `docs/modder_add_animation_quickstart.md` for a minimal step-by-step flow.
+- `examples/headnod/manifest.json` for a simple Layer 1 overlay example.
+
 ## Creating Mod Packages
 
 1. Create animation data (capture from game or export from Blender)

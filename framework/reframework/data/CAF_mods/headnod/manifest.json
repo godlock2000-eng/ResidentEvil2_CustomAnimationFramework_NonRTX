@@ -1,0 +1,31 @@
+{
+    "format_version": 1,
+    "mod_name": "Head Nod Test",
+    "mod_id": "headnod",
+    "author": "CAF Team",
+    "version": "1.0.0",
+    "description": "Tests layer 1 overlay playback with a simple head nod animation. Press G to trigger.",
+    "game": "re2",
+
+    "animations": [
+        {
+            "id": "headnod",
+            "type": "single",
+            "bank_path": "CAF_custom/test_headnod.motbank",
+            "bank_id": 950,
+            "motion_id": 0,
+            "end_frame": 59,
+            "speed": 1.0,
+            "blend_frames": 0,
+            "fsm_mode": "overlay"
+        }
+    ],
+
+    "event_bindings": [
+        {
+            "animation_id": "headnod",
+            "event": "key_pressed",
+            "conditions": { "keycode": 71 }
+        }
+    ]
+}

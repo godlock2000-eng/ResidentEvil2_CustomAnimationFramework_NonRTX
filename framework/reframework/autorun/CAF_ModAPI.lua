@@ -399,6 +399,11 @@ local function load_bank(motion, path, bank_id)
         local db = sdk.create_instance("via.motion.DynamicMotionBank"):add_ref()
         db:call("set_MotionBank", holder)
         db:call("set_Priority", 200)
+        -- Keep dynamic banks eligible across layer/local-bank routing.
+        pcall(function() db:call("set_BankType", 0) end)
+        pcall(function() db:call("set_BankTypeMaskBit", 0xFFFFFFFF) end)
+        pcall(function() db:call("set_OverwriteBankType", true) end)
+        pcall(function() db:call("set_OverwriteBankTypeMaskBit", true) end)
         local c = motion:call("getDynamicMotionBankCount")
         motion:call("setDynamicMotionBankCount", c + 1)
         motion:call("setDynamicMotionBank", c, db)
@@ -424,6 +429,11 @@ local function load_bank_for_actor(actor_motion, path, bank_id)
         local db = sdk.create_instance("via.motion.DynamicMotionBank"):add_ref()
         db:call("set_MotionBank", holder)
         db:call("set_Priority", 200)
+        -- Keep dynamic banks eligible across layer/local-bank routing.
+        pcall(function() db:call("set_BankType", 0) end)
+        pcall(function() db:call("set_BankTypeMaskBit", 0xFFFFFFFF) end)
+        pcall(function() db:call("set_OverwriteBankType", true) end)
+        pcall(function() db:call("set_OverwriteBankTypeMaskBit", true) end)
         local c = actor_motion:call("getDynamicMotionBankCount")
         actor_motion:call("setDynamicMotionBankCount", c + 1)
         actor_motion:call("setDynamicMotionBank", c, db)
@@ -646,9 +656,17 @@ end
 local function end_session(session, reason)
     if session.state ~= "playing" and session.state ~= "loading" then return end
 
-    -- CRITICAL: Reset layer speed FIRST (prevents speed stacking)
+    -- CRITICAL: Reset layer state FIRST (prevents speed stacking / ghost blending)
     if session.layer then
         pcall(function() session.layer:call("set_Speed", 1.0) end)
+        if session.is_overlay then
+            pcall(function() session.layer:call("set_BlendRate", 0.0) end)
+            -- Restore Overwrite flags on MotionFsm2Layer so FSM regains control
+            if session.fsm2_layer then
+                pcall(function() session.fsm2_layer:call("set_OverwriteBlendRate", false) end)
+                pcall(function() session.fsm2_layer:call("set_OverwriteBlendMode", false) end)
+            end
+        end
     end
 
     -- Restore FSM FIRST, before any logging
@@ -708,6 +726,7 @@ function PlaybackEngine.play(anim_id, options)
         end_time = nil,
         layer = nil,
         fsm_paused = false,
+        is_overlay = false,
         endframe_updated = false,
         end_frame = def.end_frame or KNOWN_END_FRAME_DEFAULT,
         -- Root motion
@@ -747,6 +766,7 @@ function PlaybackEngine.play(anim_id, options)
     if fsm_mode == "overlay" then
         target_layer = 1
     end
+    session.is_overlay = (target_layer > 0)
 
     -- Calculate root motion direction
     if def.movement and def.movement.distance and def.movement.distance > 0 then
@@ -778,6 +798,91 @@ function PlaybackEngine.play(anim_id, options)
         local layer = player_motion:call("getLayer", target_layer)
         if not layer then dbg("ERROR: getLayer(" .. target_layer .. ") nil"); return end
         session.layer = layer
+        if session.is_overlay then
+            -- Diagnostic: log layer defaults before any changes
+            pcall(function()
+                local jb0 = layer:call("getJointBlendRate", 0)
+                local ro, bl = "?", "?"
+                pcall(function() ro = tostring(layer:call("get_RootOnly")) end)
+                pcall(function() bl = tostring(layer:call("get_BaseLayerNo")) end)
+                dbg(string.format("L1 pre-fix: JBlend[0]=%.2f,%.2f,%.2f RootOnly=%s BaseLayer=%s",
+                    jb0 and jb0.x or -1, jb0 and jb0.y or -1, jb0 and jb0.z or -1, ro, bl))
+            end)
+            -- Diagnostic: LayerCount (try multiple method names)
+            local lc_str = "?"
+            local ok, err = pcall(function()
+                local lc = player_motion:call("getLayerCount")
+                lc_str = tostring(lc)
+            end)
+            if not ok then
+                -- Try alternative name
+                local ok2, err2 = pcall(function()
+                    local lc = player_motion:call("get_LayerCount")
+                    lc_str = tostring(lc)
+                end)
+                if not ok2 then
+                    lc_str = "ERR:" .. tostring(err):sub(1, 60) .. "|" .. tostring(err2):sub(1, 60)
+                end
+            end
+            -- Diagnostic: layer properties
+            local ajc_str, idl_str, ef_str, bi_str = "?", "?", "?", "?"
+            pcall(function() ajc_str = tostring(layer:call("get_AnimatedJointCount")) end)
+            pcall(function() idl_str = tostring(layer:call("get_Idling")) end)
+            pcall(function() ef_str = tostring(layer:call("get_EndFrame")) end)
+            pcall(function() bi_str = tostring(layer:call("get_BankID")) end)
+            dbg("L1 info: LayerCount=" .. lc_str .. " AJC=" .. ajc_str .. " Idling=" .. idl_str .. " EndFrame=" .. ef_str .. " BankID=" .. bi_str)
+            -- Layer-level blend (TreeLayer)
+            layer:call("set_BlendRate", 1.0)
+            layer:call("set_BlendMode", 0)  -- Overwrite (replaces base pose for overlay joints)
+            -- Safety: ensure layer is not root-only and blends against layer 0
+            pcall(function() layer:call("set_RootOnly", false) end)
+            pcall(function() layer:call("set_BaseLayerNo", 0) end)
+            -- Inherit mask/type routing from base layer so head/neck overlays are not masked out.
+            pcall(function()
+                local base_layer = player_motion:call("getLayer", 0)
+                if base_layer then
+                    local base_mask = nil
+                    local base_type = nil
+                    pcall(function() base_mask = base_layer:call("get_JointMaskID") end)
+                    pcall(function() base_type = base_layer:call("get_LocalBankType") end)
+                    if base_mask ~= nil then layer:call("set_JointMaskID", base_mask) end
+                    if base_type ~= nil then layer:call("set_LocalBankType", base_type) end
+                end
+            end)
+            -- CRITICAL: Set per-joint blend rates to (1,1,1) = (pos,rot,scale)
+            -- Default is (1,0,0) which zeroes out rotation blend -> invisible rotation anims
+            local jb = Vector3f.new(1.0, 1.0, 1.0)
+            for ji = 0, 79 do
+                layer:call("setJointBlendRate", ji, jb)
+            end
+            -- Overwrite flags on MotionFsm2Layer (NOT TreeLayer) to prevent FSM reset
+            -- OverwriteBlendRate/BlendMode live on via.motion.MotionFsm2Layer
+            if player_fsm2 then
+                pcall(function()
+                    local fsm2_layer = player_fsm2:call("getLayer", target_layer)
+                    if fsm2_layer then
+                        fsm2_layer:call("set_OverwriteBlendRate", true)
+                        fsm2_layer:call("set_OverwriteBlendMode", true)
+                        pcall(function()
+                            local base_layer = player_motion:call("getLayer", 0)
+                            if base_layer then
+                                local base_mask = nil
+                                local base_type = nil
+                                pcall(function() base_mask = base_layer:call("get_JointMaskID") end)
+                                pcall(function() base_type = base_layer:call("get_LocalBankType") end)
+                                if base_mask ~= nil then fsm2_layer:call("set_JointMaskID", base_mask) end
+                                if base_type ~= nil then fsm2_layer:call("set_LocalBankType", base_type) end
+                            end
+                            fsm2_layer:call("set_OverwriteJointMaskID", true)
+                            fsm2_layer:call("set_OverwriteLocalBankType", true)
+                        end)
+                        session.fsm2_layer = fsm2_layer  -- cache for cleanup
+                        dbg("FSM2 layer OverwriteBlendRate=true, OverwriteBlendMode=true")
+                    end
+                end)
+            end
+            dbg("Overlay setup: JointBlendRate=(1,1,1) x80, RootOnly=false, BaseLayer=0")
+        end
         layer:call("changeMotion", bank_id, def.motion_id or 0, 0.0, def.blend_frames or 0.0, 2, 0)
         layer:call("set_Frame", 0.0)
         layer:call("set_Speed", def.speed or 1.0)
@@ -827,6 +932,40 @@ function PlaybackEngine.update()
                 if not read_ok then
                     end_session(session, "layer_error")
                 else
+                    -- Maintain overlay blend state every frame (engine/FSM may reset)
+                    if session.is_overlay then
+                        pcall(function()
+                            session.layer:call("set_BlendRate", 1.0)
+                            session.layer:call("set_BlendMode", 0)  -- Overwrite
+                            -- Check if engine reset JointBlendRate (sample joint 0)
+                            local need_reset = false
+                            local jb0 = session.layer:call("getJointBlendRate", 0)
+                            if jb0 then
+                                if jb0.y < 0.99 or jb0.z < 0.99 then need_reset = true end
+                            else
+                                need_reset = true
+                            end
+                            if need_reset then
+                                local jb = Vector3f.new(1.0, 1.0, 1.0)
+                                for ji = 0, 79 do
+                                    session.layer:call("setJointBlendRate", ji, jb)
+                                end
+                            end
+                        end)
+                        -- One-shot diagnostic: verify blend persisted
+                        if not session.overlay_diag_done then
+                            session.overlay_diag_done = true
+                            pcall(function()
+                                local br = session.layer:call("get_BlendRate")
+                                local bm = session.layer:call("get_BlendMode")
+                                local jb5 = session.layer:call("getJointBlendRate", 5)
+                                dbg(string.format("Overlay diag: BlendRate=%.2f BlendMode=%.0f JBlend(5)=%.2f,%.2f,%.2f",
+                                    br or -1, bm or -1,
+                                    jb5 and jb5.x or -1, jb5 and jb5.y or -1, jb5 and jb5.z or -1))
+                            end)
+                        end
+                    end
+
                     -- Update endFrame from engine after delay
                     if not session.endframe_updated and elapsed > 0.15 then
                         pcall(function()
