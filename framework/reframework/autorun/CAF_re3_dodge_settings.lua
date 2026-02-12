@@ -14,8 +14,12 @@ local settings = {
     dodge_distance = 2.5,
     blend_frames = 0.0,
     dodge_cooldown = 0.0,
-    move_start = 0.01,
-    move_end = 0.99,
+    stop_on_direction_release = true,
+    iframes_enabled = true,
+    iframes_start_frame = 0,
+    iframes_duration_frames = 10,
+    move_start = 0.08,
+    move_end = 1.0,
     dodge_key = 0x56,          -- V
     dodge_pad_button = 0,      -- pad button bitmask (0 = none)
     pad_stick_deadzone = 0.5,
@@ -26,12 +30,184 @@ local settings = {
 local settings_dirty = false
 local settings_dirty_time = 0
 local last_dodge_time = 0
+local dodge_active = false
+local dodge_start_time = 0
+local dodge_session_id = nil
+local pending_move_state_refresh_frames = 0
 local registered = false
+local iframes_hooked = false
+_G.CAF_RE3_DODGE_IFRAME_HOOKED = _G.CAF_RE3_DODGE_IFRAME_HOOKED or false
+local iframe_flags_applied = false
+local iframe_sc_obj = nil
+local iframe_hp_obj = nil
 
 local function dbg(msg)
     if settings.debug_log then
         log.info(LOG_PREFIX .. msg)
     end
+end
+
+local function get_player_hp_controller()
+    local ok, hp = pcall(function()
+        local pm = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager"))
+        if not pm then return nil end
+        local pl = pm:call("get_CurrentPlayer")
+        if not pl then return nil end
+        local hp_ctrl = nil
+        pcall(function()
+            hp_ctrl = pl:call("getComponent(System.Type)", sdk.typeof("app.ropeway.HitPointController"))
+        end)
+        if not hp_ctrl then
+            pcall(function()
+                local go = pl:call("get_GameObject")
+                if go then
+                    hp_ctrl = go:call("getComponent(System.Type)", sdk.typeof("app.ropeway.HitPointController"))
+                end
+            end)
+        end
+        if not hp_ctrl then
+            pcall(function()
+                local t = pl:call("get_Transform")
+                if t then
+                    local cc = t:call("get_ChildCount")
+                    for i = 0, math.min(cc - 1, 20) do
+                        local ct = t:call("getChild", i)
+                        if ct then
+                            local cg = ct:call("get_GameObject")
+                            if cg then
+                                hp_ctrl = cg:call("getComponent(System.Type)", sdk.typeof("app.ropeway.HitPointController"))
+                                if hp_ctrl then break end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        return hp_ctrl
+    end)
+    return ok and hp or nil
+end
+
+local function get_player_survivor_condition()
+    local ok, sc = pcall(function()
+        local pm = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager"))
+        if not pm then return nil end
+        local pl = pm:call("get_CurrentPlayer")
+        if not pl then return nil end
+        local cond = nil
+        pcall(function()
+            cond = pl:call("getComponent(System.Type)", sdk.typeof("app.ropeway.survivor.SurvivorCondition"))
+        end)
+        if not cond then
+            pcall(function()
+                local go = pl:call("get_GameObject")
+                if go then
+                    cond = go:call("getComponent(System.Type)", sdk.typeof("app.ropeway.survivor.SurvivorCondition"))
+                end
+            end)
+        end
+        if not cond then
+            pcall(function()
+                local t = pl:call("get_Transform")
+                if t then
+                    local cc = t:call("get_ChildCount")
+                    for i = 0, math.min(cc - 1, 20) do
+                        local ct = t:call("getChild", i)
+                        if ct then
+                            local cg = ct:call("get_GameObject")
+                            if cg then
+                                cond = cg:call("getComponent(System.Type)", sdk.typeof("app.ropeway.survivor.SurvivorCondition"))
+                                if cond then break end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        return cond
+    end)
+    return ok and sc or nil
+end
+
+local function is_iframe_active()
+    if not settings.iframes_enabled then return false end
+    if not dodge_active then return false end
+    if settings.iframes_duration_frames <= 0 then return false end
+
+    local elapsed = os.clock() - dodge_start_time
+    local speed = math.max(settings.speed or 1.0, 0.001)
+    local start_s = (settings.iframes_start_frame or 0) / (60.0 * speed)
+    local end_s = ((settings.iframes_start_frame or 0) + (settings.iframes_duration_frames or 0)) / (60.0 * speed)
+    return elapsed >= start_s and elapsed <= end_s
+end
+
+local function clear_stuck_protection_flags()
+    local sc = get_player_survivor_condition()
+    local hp = get_player_hp_controller()
+    if sc then
+        pcall(function() sc:call("set_IgnoreGrapple", false) end)
+        pcall(function() sc:call("set_Invincible", false) end)
+        pcall(function() sc:call("set_NoDamage", false) end)
+    end
+    if hp then
+        pcall(function() hp:call("set_Invincible", false) end)
+        pcall(function() hp:call("set_NoDamage", false) end)
+    end
+end
+
+local function update_iframe_runtime_flags()
+    local should_apply = is_iframe_active()
+    -- Safety model: only drive IgnoreGrapple live; damage i-frames are enforced
+    -- via hook-time SKIP_ORIGINAL. Avoid persistent Invincible/NoDamage toggles.
+    local sc = iframe_sc_obj or get_player_survivor_condition()
+    iframe_sc_obj = sc
+    if sc then
+        pcall(function() sc:call("set_IgnoreGrapple", should_apply) end)
+    end
+    if should_apply and not iframe_flags_applied then
+        iframe_flags_applied = true
+        dbg("I-frame active (IgnoreGrapple + damage hook)")
+    elseif not should_apply and iframe_flags_applied then
+        iframe_flags_applied = false
+        iframe_sc_obj = nil
+        iframe_hp_obj = nil
+        dbg("I-frame ended")
+    end
+end
+
+local function ensure_iframe_hook()
+    if iframes_hooked or _G.CAF_RE3_DODGE_IFRAME_HOOKED then
+        iframes_hooked = true
+        return
+    end
+    pcall(function()
+        local td = sdk.find_type_definition("app.ropeway.HitPointController")
+        if not td then return end
+        local method = td:get_method("addDamage(System.Int32)")
+        if not method then return end
+        local function same_managed_obj(a, b)
+            if not a or not b then return false end
+            return tostring(a) == tostring(b)
+        end
+        sdk.hook(method, function(args)
+            if not is_iframe_active() then
+                return sdk.PreHookResult.CALL_ORIGINAL
+            end
+            local this_hp = sdk.to_managed_object(args[2])
+            if not this_hp then
+                return sdk.PreHookResult.CALL_ORIGINAL
+            end
+            local player_hp = get_player_hp_controller()
+            if player_hp and same_managed_obj(this_hp, player_hp) then
+                dbg("I-frame: blocked player damage")
+                return sdk.PreHookResult.SKIP_ORIGINAL
+            end
+            return sdk.PreHookResult.CALL_ORIGINAL
+        end, nil)
+        iframes_hooked = true
+        _G.CAF_RE3_DODGE_IFRAME_HOOKED = true
+        dbg("I-frame damage hook installed")
+    end)
 end
 
 --------------------------------------------------------------------------------
@@ -73,6 +249,11 @@ local function apply_settings()
     for _, anim_id in ipairs(ANIM_IDS) do
         local def = CAF.getAnimation(anim_id)
         if def then
+            -- Two runtime variants:
+            -- 1) stop_on_direction_release=true  -> fsm_mode=none (current responsive behavior)
+            -- 2) stop_on_direction_release=false -> fsm_mode=pause (always play full animation)
+            def.fsm_mode = settings.stop_on_direction_release and "none" or "pause"
+            def.layer = 0
             def.speed = settings.speed
             def.blend_frames = settings.blend_frames
             if def.movement then
@@ -144,6 +325,23 @@ local function try_register()
         -- Cooldown
         c, v = imgui.slider_float("Cooldown (s)##dodge", settings.dodge_cooldown, 0.0, 3.0, "%.1f")
         if c then settings.dodge_cooldown = v; changed = true end
+
+        -- Direction release behavior toggle
+        c, settings.stop_on_direction_release = imgui.checkbox(
+            "Stop dodge when direction released##dodge",
+            settings.stop_on_direction_release
+        )
+        if c then changed = true end
+
+        -- I-frames
+        c, settings.iframes_enabled = imgui.checkbox("Enable i-frames##dodge", settings.iframes_enabled)
+        if c then changed = true end
+        if settings.iframes_enabled then
+            c, v = imgui.slider_float("I-frame start (anim frame)##dodge", settings.iframes_start_frame, 0.0, 60.0, "%.0f")
+            if c then settings.iframes_start_frame = math.floor(v); changed = true end
+            c, v = imgui.slider_float("I-frame duration (frames)##dodge", settings.iframes_duration_frames, 0.0, 60.0, "%.0f")
+            if c then settings.iframes_duration_frames = math.floor(v); changed = true end
+        end
 
         -- Dodge key rebind
         local key_name = KB_KEY_NAMES[settings.dodge_key] or string.format("0x%02X", settings.dodge_key)
@@ -241,6 +439,34 @@ local function try_register()
         local anim_id = data.anim_id or ""
         if anim_id:find("^" .. MOD_ID .. ":dodge_") then
             last_dodge_time = os.clock()
+            dodge_active = true
+            dodge_start_time = os.clock()
+            dodge_session_id = data.session_id
+            pending_move_state_refresh_frames = 0
+            update_iframe_runtime_flags()
+        end
+    end)
+
+    CAF.on("animation:ended", function(data)
+        if not dodge_active then return end
+        local anim_id = data.anim_id or ""
+        if anim_id:find("^" .. MOD_ID .. ":dodge_") then
+            if (data.session_id ~= nil and dodge_session_id ~= nil and data.session_id == dodge_session_id) or data.session_id == nil then
+                dodge_active = false
+                dodge_session_id = nil
+                local moved = tonumber(data.moved or 0) or 0
+                local expected = tonumber(settings.dodge_distance or 0) or 0
+                local short_root_motion = (expected > 0) and (moved < (expected * 0.85))
+                local ended_collision_like = (data.wall_hit == true) or (data.root_motion_halted == true) or short_root_motion
+                if ended_collision_like then
+                    -- Avoid a visible hitch while player keeps moving after a
+                    -- collision-shortened dodge. Locomotion is already healthy.
+                    pending_move_state_refresh_frames = 0
+                else
+                    pending_move_state_refresh_frames = 3
+                end
+                update_iframe_runtime_flags()
+            end
         end
     end)
 
@@ -253,6 +479,11 @@ local function try_register()
             end
         end
     end, 100)  -- High priority: runs before the animation binding
+
+    -- Install i-frame damage hook once CAF is ready.
+    ensure_iframe_hook()
+    -- Recover from any previously stuck invincibility flags.
+    clear_stuck_protection_flags()
 
     registered = true
     log.info(LOG_PREFIX .. "Registered settings UI with CAF ModAPI")
@@ -278,6 +509,25 @@ re.on_frame(function()
     if not registered then
         try_register()
     end
+
+    if pending_move_state_refresh_frames > 0 and not dodge_active then
+        local sc = get_player_survivor_condition()
+        if sc then
+            pcall(function() sc:call("safeResetState") end)
+            pcall(function() sc:call("checkNeedTransitionState") end)
+        end
+        pending_move_state_refresh_frames = pending_move_state_refresh_frames - 1
+    end
+
+    -- Failsafe: ensure dodge state cannot remain active indefinitely if an
+    -- animation-ended event is missed due to interruption/reload edge cases.
+    if dodge_active and (os.clock() - dodge_start_time) > 3.0 then
+        dodge_active = false
+        dodge_session_id = nil
+    end
+
+    -- Keep grapple/damage immunity flags synced with i-frame window.
+    update_iframe_runtime_flags()
 
     -- Debounced settings save
     if settings_dirty and os.clock() - settings_dirty_time > 0.5 then

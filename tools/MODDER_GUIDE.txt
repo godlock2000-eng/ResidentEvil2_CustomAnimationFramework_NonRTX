@@ -1,0 +1,220 @@
+Custom Animation Framework — Modder Quick-Start Guide
+=====================================================
+
+OVERVIEW
+--------
+CAF lets you add custom animations to RE2 Remake by writing a JSON manifest
+and providing .motlist.85 / .motbank.1 binary files. No Lua code required
+for basic mods — just drop files in the right folders.
+
+For full documentation, see the GitHub wiki.
+For a short step-by-step workflow, see MODDER_ADD_ANIMATION_STEPS.txt.
+
+
+CREATING A MOD PACKAGE
+----------------------
+
+1. Choose a unique mod_id (e.g., "my_finisher_pack").
+
+2. Create your animation binaries using the included Python tools:
+
+   a) Capture bone data from the game using DodgeDumperV5.lua (see tools/)
+      or export from Blender.
+
+   b) Convert to .motlist.85:
+      python dump_to_motlist.py my_anim_dump.txt --output my_anim.motlist.85
+
+   c) Create a .motbank.1 wrapper:
+      python motbank_writer.py --motlist-path "CAF_mods/my_mod/my_anim.motlist" --bank-id 910 --output my_anim.motbank.1
+
+   IMPORTANT: The --bank-id you choose here MUST match the bank_id in your
+   manifest.json. Use 900+ to avoid conflicts with game banks.
+
+3. Place binary files in the game's natives folder:
+   natives/x64/CAF_mods/my_mod/my_anim.motlist.85
+   natives/x64/CAF_mods/my_mod/my_anim.motbank.1
+
+4. Create your manifest at:
+   reframework/data/CAF_mods/my_mod/manifest.json
+
+   Minimal example:
+   {
+       "format_version": 1,
+       "mod_name": "My Animation Pack",
+       "mod_id": "my_mod",
+       "author": "YourName",
+       "version": "1.0.0",
+       "description": "My custom animations for RE2R.",
+       "game": "re2",
+       "animations": [
+           {
+               "id": "my_anim",
+               "type": "single",
+               "bank_path": "CAF_mods/my_mod/my_anim.motbank",
+               "bank_id": 910,
+               "motion_id": 0,
+               "end_frame": 120,
+               "speed": 1.0,
+               "blend_frames": 0,
+               "fsm_mode": "pause"
+           }
+       ],
+       "event_bindings": [
+           {
+               "animation_id": "my_anim",
+               "event": "key_pressed",
+               "conditions": { "keycode": 71 }
+           }
+       ]
+   }
+
+5. Launch the game. Your mod appears in the CAF menu under "Loaded Mods."
+
+
+MANIFEST REFERENCE
+------------------
+
+Top-level fields:
+  format_version  - Always 1
+  mod_name        - Display name
+  mod_id          - Unique ID (used as prefix: "mod_id:anim_id")
+  author          - Your name
+  version         - Semantic version string
+  description     - Short description
+  game            - "re2" (only supported game currently)
+
+Animation fields:
+  id              - Animation name (combined with mod_id: "mod_id:id")
+  type            - "single" (single-actor) or "paired"
+  bank_path       - Path relative to natives/x64/ (use .motbank, engine finds .motbank.1)
+  bank_id         - Must match the bank_id in your .motbank.1 file
+  motion_id       - Index within the motlist (usually 0 for single-anim motlists)
+  end_frame       - Last frame number (e.g., 179 for 180-frame anim)
+  speed           - Playback speed multiplier (1.0 = normal)
+  blend_frames    - Transition blend frames (0 = instant)
+  fsm_mode        - "pause" (full body takeover), "overlay" (layer 1, movement continues), "none"
+  layer           - Motion layer (0 = full body, 1 = overlay, default based on fsm_mode)
+  movement        - Optional root motion:
+    distance      - Movement distance in meters
+    direction     - "forward", "backward", "left", "right"
+    start_pct     - Animation progress % when movement starts (0.0-1.0)
+    end_pct       - Animation progress % when movement ends (0.0-1.0)
+    wall_detection - true/false
+
+Event binding fields:
+  animation_id    - Which animation to play (matches "id" field above)
+  event           - Event name: "key_pressed", "player_damaged", "enemy_proximity", etc.
+  conditions      - Object of condition checks:
+    keycode       - Virtual key code (86=V, 71=G, 72=H, etc.)
+    direction_key - "W", "A", "S", "D" (checks if held simultaneously)
+    damage_gt     - Minimum damage amount
+    hp_pct_lt     - HP percentage threshold (0.0-1.0)
+    kind_id       - Enemy type (e.g., "em0000" for zombie)
+    distance_lt   - Maximum distance in meters
+
+
+EVENTS
+------
+key_pressed         - Fires on key down (edge-triggered). Data: keycode, key_name
+player_damaged      - Fires when player takes damage. Data: damage, hp_before, hp_max, hp_pct
+health_threshold    - Fires when HP crosses 75/50/25%. Data: percent, direction, hp, hp_max
+enemy_proximity     - Fires when enemy enters/exits range. Data: kind_id, distance, entered
+weapon_fired        - Fires on weapon discharge. Data: weapon_type
+weapon_changed      - Fires on weapon swap. Data: weapon_type, prev_weapon_type
+
+
+LUA API (ADVANCED)
+------------------
+For mods that need Lua scripting, require the API module:
+
+    local caf = require("CAF_ModAPI/API")
+
+Key functions:
+    CAF.play(anim_id)              - Play a registered animation, returns session_id
+    CAF.stop(session_id)           - Stop a playing animation
+    CAF.registerAnimation(id, def) - Register a custom animation definition
+    CAF.on(event, callback, prio)  - Listen for events
+    CAF.off(event, listener_id)    - Remove a listener
+    CAF.emit(event, data)          - Emit a custom event
+    CAF.bindEvent(anim_id, event, opts) - Bind an animation to an event
+    CAF.registerChain(id, def)     - Register a combo chain
+    CAF.registerModUI(mod_id, fn)  - Register a custom UI panel
+    CAF.isReady()                  - Check if framework is initialized
+    CAF.getPlayer()                - Get player managed object
+    CAF.getPlayerMotion()          - Get player's via.motion.Motion component
+    CAF.getEnemies()               - Get list of nearby enemies
+    CAF.loadBank(path, bank_id)    - Manually load a motion bank
+
+
+INCLUDED TOOLS
+--------------
+
+Python tools (requires Python 3.6+):
+  mot_writer.py             - Convert JSON animation data to .motlist.85 binary
+  motbank_writer.py         - Create .motbank.1 wrapper files (sets bank_id, links motlist)
+  dump_to_motlist.py        - Convert bone dump text files to .motlist.85 binary
+  validate_against_real.py  - Parse and dump .motlist.85 fields for debugging / comparison
+  blender_anim_exporter.py  - Blender add-on (3.0+): export armature animation as CAF JSON
+                              Install via Blender > Edit > Preferences > Add-ons > Install
+  resolve_bone_names.py     - Cross-reference bone hash dumps between RE2 and RE3 to map
+                              bone indices; outputs updated mapping JSON + Lua table
+
+REFramework Lua scripts (deploy to <game_dir>/reframework/autorun/):
+  DodgeDumperV4.lua         - RE3: capture all bones per-frame (single direction recording)
+                              Discover bones, select direction, record 180 frames
+  DodgeDumperV5.lua         - RE3: improved capture with two modes:
+                              Single: per-direction with 3-sec countdown
+                              Continuous: 30-sec recording with auto dodge event detection
+  RE2BoneHashDumper.lua     - RE2: dump all joint names, indices, and name hashes
+                              Output: reframework/data/re2_bone_hashes.txt
+  RE3BoneHashDumper.lua     - RE3: dump all joint names, indices, and name hashes
+                              Output: reframework/data/re3_bone_hashes.txt
+
+Typical workflow:
+  1. Deploy DodgeDumperV5.lua to RE3, capture dodge animations
+  2. Run: python dump_to_motlist.py dodge_dump_front.txt -o dodge_front.motlist.85
+  3. Run: python motbank_writer.py --motlist-path CAF_mods/my_mod/dodge_front.motlist --bank-id 910 -o dodge_front.motbank.1
+  4. Place .motlist.85 and .motbank.1 in natives/x64/CAF_mods/my_mod/
+  5. Write manifest.json with matching bank_id and place in reframework/data/CAF_mods/my_mod/
+
+Alternative Blender workflow:
+  1. Install blender_anim_exporter.py as Blender add-on
+  2. Animate armature, export as JSON from CAF sidebar panel
+  3. Run: python mot_writer.py animation_export.json -o my_anim.motlist.85
+  4. Continue from step 3 above
+
+
+EXTERNAL RESOURCES
+------------------
+
+These are not included in this download but are useful for advanced modding:
+
+RE-Engine-010-Templates (by alphazolam)
+  https://github.com/alphazolam/RE-Engine-010-Templates
+  010 Editor binary templates for inspecting RE Engine file formats.
+  Includes RE_Engine_motlist.bt, RE_Engine_motbank.bt, and RE_CLIP_TML.bt
+  for examining .motlist.85 and .motbank.1 file structure at the byte level.
+  Essential for debugging custom animation binaries.
+
+REFramework il2cpp_dump.json
+  Generated automatically by REFramework on first game launch.
+  Located in your RE2 game directory after running the game with REFramework.
+  Contains all game type definitions (classes, methods, fields, properties).
+  Search for "via.motion.Motion", "via.motion.DynamicMotionBank",
+  "via.motion.TreeLayer" etc. to discover the animation APIs that CAF uses.
+  This is how all REFramework mod developers find available game APIs.
+
+EMV-Engine (by alphazolam)
+  https://github.com/alphazolam/EMV-Engine
+  Collection of REFramework Lua scripts for RE Engine games.
+  Includes MotionBank/MotionList browsing utilities.
+
+
+VIRTUAL KEY CODES (COMMON)
+--------------------------
+A=0x41  B=0x42  C=0x43  D=0x44  E=0x45  F=0x46  G=0x47  H=0x48
+I=0x49  J=0x4A  K=0x4B  L=0x4C  M=0x4D  N=0x4E  O=0x4F  P=0x50
+Q=0x51  R=0x52  S=0x53  T=0x54  U=0x55  V=0x56  W=0x57  X=0x58
+Y=0x59  Z=0x5A
+F1-F12: 0x70-0x7B
+Space=0x20  Enter=0x0D  Shift=0x10  Ctrl=0x11  Alt=0x12  Esc=0x1B

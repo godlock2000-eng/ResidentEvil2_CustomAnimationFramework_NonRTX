@@ -1,0 +1,107 @@
+﻿{
+    "format_version": 1,
+    "mod_name": "RE3 Dodge Pack",
+    "mod_id": "re3_dodge",
+    "author": "CAF Team",
+    "version": "1.0.0",
+    "description": "Adds RE3-style dodge animations to RE2 Remake. Press V + WASD for directional dodge.",
+    "game": "re2",
+
+    "animations": [
+        {
+            "id": "dodge_front",
+            "type": "single",
+            "bank_path": "CAF_custom/dodge_front.motbank",
+            "bank_id": 900,
+            "motion_id": 0,
+            "end_frame": 179,
+            "speed": 2.0,
+            "blend_frames": 0,
+            "fsm_mode": "none",
+            "movement": {
+                "distance": 2.5,
+                "direction": "forward",
+                "start_pct": 0.08,
+                "end_pct": 1.0,
+                "wall_detection": true
+            }
+        },
+        {
+            "id": "dodge_back",
+            "type": "single",
+            "bank_path": "CAF_custom/dodge_back.motbank",
+            "bank_id": 901,
+            "motion_id": 0,
+            "end_frame": 179,
+            "speed": 2.0,
+            "blend_frames": 0,
+            "fsm_mode": "none",
+            "movement": {
+                "distance": 2.5,
+                "direction": "backward",
+                "start_pct": 0.08,
+                "end_pct": 1.0,
+                "wall_detection": true
+            }
+        },
+        {
+            "id": "dodge_left",
+            "type": "single",
+            "bank_path": "CAF_custom/dodge_left.motbank",
+            "bank_id": 902,
+            "motion_id": 0,
+            "end_frame": 179,
+            "speed": 2.0,
+            "blend_frames": 0,
+            "fsm_mode": "none",
+            "movement": {
+                "distance": 2.5,
+                "direction": "left",
+                "start_pct": 0.08,
+                "end_pct": 1.0,
+                "wall_detection": true
+            }
+        },
+        {
+            "id": "dodge_right",
+            "type": "single",
+            "bank_path": "CAF_custom/dodge_right.motbank",
+            "bank_id": 903,
+            "motion_id": 0,
+            "end_frame": 179,
+            "speed": 2.0,
+            "blend_frames": 0,
+            "fsm_mode": "none",
+            "movement": {
+                "distance": 2.5,
+                "direction": "right",
+                "start_pct": 0.08,
+                "end_pct": 1.0,
+                "wall_detection": true
+            }
+        }
+    ],
+
+    "event_bindings": [
+        {
+            "animation_id": "dodge_front",
+            "event": "key_pressed",
+            "conditions": { "keycode": 86, "direction_key": "W" }
+        },
+        {
+            "animation_id": "dodge_back",
+            "event": "key_pressed",
+            "conditions": { "keycode": 86, "direction_key": "S" }
+        },
+        {
+            "animation_id": "dodge_left",
+            "event": "key_pressed",
+            "conditions": { "keycode": 86, "direction_key": "A" }
+        },
+        {
+            "animation_id": "dodge_right",
+            "event": "key_pressed",
+            "conditions": { "keycode": 86, "direction_key": "D" }
+        }
+    ]
+}

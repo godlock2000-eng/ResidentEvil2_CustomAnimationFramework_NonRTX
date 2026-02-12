@@ -1,4 +1,4 @@
-{
+﻿{
     "format_version": 1,
     "mod_name": "RE3 Dodge Pack",
     "mod_id": "re3_dodge",
@@ -17,12 +17,12 @@
             "end_frame": 179,
             "speed": 2.0,
             "blend_frames": 0,
-            "fsm_mode": "pause",
+            "fsm_mode": "none",
             "movement": {
                 "distance": 2.5,
                 "direction": "forward",
-                "start_pct": 0.01,
-                "end_pct": 0.99,
+                "start_pct": 0.08,
+                "end_pct": 1.0,
                 "wall_detection": true
             }
         },
@@ -35,12 +35,12 @@
             "end_frame": 179,
             "speed": 2.0,
             "blend_frames": 0,
-            "fsm_mode": "pause",
+            "fsm_mode": "none",
             "movement": {
                 "distance": 2.5,
                 "direction": "backward",
-                "start_pct": 0.01,
-                "end_pct": 0.99,
+                "start_pct": 0.08,
+                "end_pct": 1.0,
                 "wall_detection": true
             }
         },
@@ -53,12 +53,12 @@
             "end_frame": 179,
             "speed": 2.0,
             "blend_frames": 0,
-            "fsm_mode": "pause",
+            "fsm_mode": "none",
             "movement": {
                 "distance": 2.5,
                 "direction": "left",
-                "start_pct": 0.01,
-                "end_pct": 0.99,
+                "start_pct": 0.08,
+                "end_pct": 1.0,
                 "wall_detection": true
             }
         },
@@ -71,12 +71,12 @@
             "end_frame": 179,
             "speed": 2.0,
             "blend_frames": 0,
-            "fsm_mode": "pause",
+            "fsm_mode": "none",
             "movement": {
                 "distance": 2.5,
                 "direction": "right",
-                "start_pct": 0.01,
-                "end_pct": 0.99,
+                "start_pct": 0.08,
+                "end_pct": 1.0,
                 "wall_detection": true
             }
         }

@@ -1,0 +1,107 @@
+CAF Modder Guide - Add One Animation (Quick Steps)
+==================================================
+
+This is the shortest path to add a custom animation mod package.
+
+1) Create your animation files
+------------------------------
+- `input.json` must be a CAF_AnimData file (the format used by `mot_writer.py`).
+- You can get `input.json` in two common ways:
+  A) Blender pipeline
+     - Install/use `tools\blender_anim_exporter.py`
+     - Export your animation to JSON (example: `my_anim.json`)
+  B) Dump pipeline (capture from game)
+     - Capture with `tools\DodgeDumperV5.lua` (RE3 only)
+     - Convert dump text to motlist directly with:
+       python tools\dump_to_motlist.py my_dump.txt output.motlist.85 --ref tools\test_output\dodge_front.motlist.85
+
+Important compatibility notes:
+- `DodgeDumperV4.lua` and `DodgeDumperV5.lua` are RE3-only capture tools.
+- Blender conversion is not strictly "RE Mesh Tool only", but your exported armature
+  must match RE2 expectations (bone names, hierarchy, and sensible rest pose).
+- In practice, using a skeleton sourced from RE Mesh Tool (or an equivalent accurate
+  RE2 skeleton) is the most reliable path.
+
+- If you have JSON, build a motlist with:
+  python tools\mot_writer.py convert input.json output.motlist.85 --ref tools\test_output\dodge_front.motlist.85 --uncompressed
+
+- What this command does:
+  - `convert` = use the JSON->motlist path
+  - `input.json` = your animation JSON
+  - `output.motlist.85` = generated animation file used by RE2
+  - `--ref ...dodge_front.motlist.85` = maps bone names to correct RE2 skeleton indices
+  - `--uncompressed` = uses uncompressed rotation keys (safer for debugging/new animations)
+
+- Optional sanity check:
+  python tools\mot_writer.py validate output.motlist.85
+
+- Wrap the motlist in a motbank:
+  python tools\motbank_writer.py CAF_custom\my_anim.motlist output.motbank.1 --bank-id 950 --layer-mask 0xFFFFFFFF
+
+Notes:
+- `bank_id` in motbank and manifest must match.
+- `layer_mask 0xFFFFFFFF` is recommended for Layer 1 overlay compatibility.
+
+2) Place files in CAF paths
+---------------------------
+- Copy binaries to:
+  natives\x64\CAF_custom\my_anim.motlist.85
+  natives\x64\CAF_custom\my_anim.motbank.1
+
+- Create mod folder and manifest:
+  reframework\data\CAF_mods\my_mod\manifest.json
+
+3) Add manifest
+---------------
+Use this minimal template:
+
+{
+    "format_version": 1,
+    "mod_name": "My Animation",
+    "mod_id": "my_mod",
+    "author": "YourName",
+    "version": "1.0.0",
+    "description": "Simple custom animation mod.",
+    "game": "re2",
+    "animations": [
+        {
+            "id": "my_anim",
+            "type": "single",
+            "bank_path": "CAF_custom/my_anim.motbank",
+            "bank_id": 950,
+            "motion_id": 0,
+            "end_frame": 59,
+            "speed": 1.0,
+            "blend_frames": 0,
+            "fsm_mode": "overlay"
+        }
+    ],
+    "event_bindings": [
+        {
+            "animation_id": "my_anim",
+            "event": "key_pressed",
+            "conditions": { "keycode": 71 }
+        }
+    ]
+}
+
+4) Register mod in index
+------------------------
+Edit:
+  reframework\data\CAF_mods\index.json
+
+Add your mod_id:
+{
+    "mods": ["re3_dodge", "headnod", "my_mod"]
+}
+
+5) Test in game
+---------------
+- Launch RE2 with REFramework.
+- Open REFramework menu (Insert) -> CAF Mod API.
+- Press your test key (example above uses G key, keycode 71).
+
+Reference examples:
+- examples\re3_dodge\manifest.json
+- examples\headnod\manifest.json
+

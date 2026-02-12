@@ -72,9 +72,10 @@ end
 function EventBus.emit(event_name, data)
     if EventBus.processing then
         table.insert(EventBus.deferred, {event_name, data})
-        return
+        return false
     end
     EventBus.processing = true
+    local blocked = false
 
     local list = EventBus.listeners[event_name]
     if list then
@@ -83,7 +84,10 @@ function EventBus.emit(event_name, data)
             if not ok then
                 log.info(LOG_PREFIX .. "Event error (" .. event_name .. "): " .. tostring(result))
             end
-            if result == false then break end
+            if result == false then
+                blocked = true
+                break
+            end
         end
     end
 
@@ -92,6 +96,7 @@ function EventBus.emit(event_name, data)
         local ev = table.remove(EventBus.deferred, 1)
         EventBus.emit(ev[1], ev[2])
     end
+    return blocked
 end
 
 --------------------------------------------------------------------------------
@@ -140,6 +145,8 @@ local active_chains = {}             -- { [chain_id] = chain_state }
 -- Config (user-tunable)
 local CFG = {
     debug_log = true,
+    dodge_debug = true,               -- high-verbosity diagnostics for re3_dodge sessions
+    dodge_debug_every_n_frames = 1,   -- 1 = every frame; raise to reduce spam
     proximity_radius = 5.0,
     health_thresholds = { 0.75, 0.50, 0.25, 0.10 },
     max_concurrent = MAX_SESSIONS,
@@ -156,6 +163,21 @@ local function dbg(msg)
     if CFG.debug_log then
         log.info(LOG_PREFIX .. msg)
     end
+end
+
+local function is_dodge_anim_id(anim_id)
+    return type(anim_id) == "string" and anim_id:find("^re3_dodge:dodge_") ~= nil
+end
+
+local function is_dodge_session(session)
+    return session and is_dodge_anim_id(session.anim_id)
+end
+
+local function dbg_dodge(session, msg)
+    if not CFG.debug_log or not CFG.dodge_debug then return end
+    if session and not is_dodge_session(session) then return end
+    local sid = session and session.id or "?"
+    log.info(LOG_PREFIX .. "[DODGE][S#" .. tostring(sid) .. "] " .. tostring(msg))
 end
 
 local function log_event(name, summary)
@@ -241,6 +263,8 @@ local function save_settings()
     pcall(function()
         json.dump_file(SETTINGS_FILE, {
             debug_log = CFG.debug_log,
+            dodge_debug = CFG.dodge_debug,
+            dodge_debug_every_n_frames = CFG.dodge_debug_every_n_frames,
             proximity_radius = CFG.proximity_radius,
             max_concurrent = CFG.max_concurrent,
         })
@@ -251,6 +275,10 @@ local function load_settings()
     local ok, data = pcall(json.load_file, SETTINGS_FILE)
     if not ok or not data then return false end
     if data.debug_log ~= nil then CFG.debug_log = data.debug_log end
+    if data.dodge_debug ~= nil then CFG.dodge_debug = data.dodge_debug end
+    if data.dodge_debug_every_n_frames ~= nil then
+        CFG.dodge_debug_every_n_frames = math.max(1, math.floor(tonumber(data.dodge_debug_every_n_frames) or 1))
+    end
     if data.proximity_radius then CFG.proximity_radius = data.proximity_radius end
     if data.max_concurrent then CFG.max_concurrent = data.max_concurrent end
     dbg("Settings loaded")
@@ -472,8 +500,12 @@ local function pause_fsm()
 
     local paused_ok = false
     pcall(function() player_fsm2:call("set_Paused", true); paused_ok = true end)
+    -- Avoid disabling the FSM unless pausing failed; disabling causes input
+    -- edge issues where movement can stay locked until keys are released.
     local disabled_ok = false
-    pcall(function() player_fsm2:call("set_Enabled", false); disabled_ok = true end)
+    if not paused_ok then
+        pcall(function() player_fsm2:call("set_Enabled", false); disabled_ok = true end)
+    end
 
     if paused_ok and disabled_ok then fsm_method = "paused+disabled"
     elseif paused_ok then fsm_method = "paused"
@@ -668,11 +700,29 @@ local function end_session(session, reason)
             end
         end
     end
+    -- Fallback: if the cached layer handle became invalid/lost, try restoring
+    -- speed on the expected layer index so locomotion cannot stay boosted.
+    if (not session.layer) and player_motion then
+        pcall(function()
+            local li = (session.def and session.def.layer) or 0
+            local lyr = player_motion:call("getLayer", li)
+            if lyr then lyr:call("set_Speed", 1.0) end
+        end)
+    end
 
     -- Restore FSM FIRST, before any logging
     if session.fsm_paused then
         unpause_fsm()
         session.fsm_paused = false
+    end
+    -- Re-apply speed normalization after FSM resume as well, since the FSM
+    -- may re-touch layer playback parameters during unpause.
+    if player_motion then
+        pcall(function()
+            local li = (session.def and session.def.layer) or 0
+            local lyr = player_motion:call("getLayer", li)
+            if lyr then lyr:call("set_Speed", 1.0) end
+        end)
     end
 
     -- Now safe to log
@@ -681,6 +731,21 @@ local function end_session(session, reason)
         dbg("Session #" .. session.id .. " " .. session.anim_id .. " ended: " .. reason ..
             string.format(" (%.2fs)", elapsed))
     end)
+    if is_dodge_session(session) then
+        local elapsed = os.clock() - (session.start_time or os.clock())
+        dbg_dodge(session, string.format(
+            "END reason=%s elapsed=%.3f frame=%.2f end=%.2f speed=%.3f bank=%s moved=%.3f wall_hit=%s wall_hits=%d",
+            tostring(reason),
+            elapsed,
+            tonumber(session.engine_frame or -1) or -1,
+            tonumber(session.end_frame or -1) or -1,
+            tonumber(session.engine_speed or -1) or -1,
+            tostring(session.cur_bank_id),
+            tonumber(session.moved or 0) or 0,
+            tostring(session.wall_hit),
+            tonumber(session.wall_drift_hits or 0) or 0
+        ))
+    end
 
     session.state = "complete"
     session.end_time = os.clock()
@@ -689,6 +754,9 @@ local function end_session(session, reason)
         session_id = session.id,
         anim_id = session.anim_id,
         reason = reason,
+        wall_hit = session.wall_hit == true,
+        root_motion_halted = session.root_motion_halted == true,
+        moved = tonumber(session.moved or 0) or 0,
     })
 
     if session.on_complete then
@@ -701,6 +769,18 @@ function PlaybackEngine.play(anim_id, options)
     if not def then
         dbg("Play: animation '" .. tostring(anim_id) .. "' not registered")
         return nil
+    end
+
+    -- Safety guard for dodge package: never run multiple concurrent sessions
+    -- for the same dodge anim id. This prevents transform conflicts/jank if
+    -- duplicate triggers fire in the same frame window.
+    if is_dodge_anim_id(anim_id) then
+        for _, s in pairs(PlaybackEngine.sessions) do
+            if s and s.state == "playing" and s.anim_id == anim_id then
+                dbg_dodge(s, "PLAY skipped duplicate trigger; session already active")
+                return s.id
+            end
+        end
     end
 
     if def.type == "paired" then
@@ -735,6 +815,7 @@ function PlaybackEngine.play(anim_id, options)
         moved = 0,
         last_set_pos = nil,
         wall_hit = false,
+        wall_drift_hits = 0,
         -- Debug
         engine_frame = 0,
         engine_speed = 0,
@@ -833,7 +914,7 @@ function PlaybackEngine.play(anim_id, options)
             dbg("L1 info: LayerCount=" .. lc_str .. " AJC=" .. ajc_str .. " Idling=" .. idl_str .. " EndFrame=" .. ef_str .. " BankID=" .. bi_str)
             -- Layer-level blend (TreeLayer)
             layer:call("set_BlendRate", 1.0)
-            layer:call("set_BlendMode", 0)  -- Overwrite (replaces base pose for overlay joints)
+            layer:call("set_BlendMode", 1)  -- AddBlend (adds overlay rotation to base pose)
             -- Safety: ensure layer is not root-only and blends against layer 0
             pcall(function() layer:call("set_RootOnly", false) end)
             pcall(function() layer:call("set_BaseLayerNo", 0) end)
@@ -899,6 +980,25 @@ function PlaybackEngine.play(anim_id, options)
     PlaybackEngine.sessions[session.id] = session
     dbg("Session #" .. session.id .. " started: " .. anim_id ..
         " (bank=" .. tostring(bank_id) .. " fsm=" .. fsm_mode .. ")")
+    if is_dodge_session(session) then
+        local md = session.def and session.def.movement or nil
+        dbg_dodge(session, string.format(
+            "START fsm=%s layer=%s bank=%s motion=%s speed=%.3f dist=%.3f move_start=%.3f move_end=%.3f dir=(%.3f,%.3f) pos=(%.3f,%.3f,%.3f)",
+            tostring(fsm_mode),
+            tostring(session.def and session.def.layer or "nil"),
+            tostring(bank_id),
+            tostring(session.def and session.def.motion_id or "nil"),
+            tonumber(session.def and session.def.speed or 1.0) or 1.0,
+            tonumber(md and md.distance or 0) or 0,
+            tonumber(md and md.start_pct or 0) or 0,
+            tonumber(md and md.end_pct or 1) or 1,
+            tonumber(session.move_dir and session.move_dir.x or 0) or 0,
+            tonumber(session.move_dir and session.move_dir.z or 0) or 0,
+            tonumber(session.start_pos and session.start_pos.x or 0) or 0,
+            tonumber(session.start_pos and session.start_pos.y or 0) or 0,
+            tonumber(session.start_pos and session.start_pos.z or 0) or 0
+        ))
+    end
 
     EventBus.emit("animation:started", {
         session_id = session.id,
@@ -932,11 +1032,60 @@ function PlaybackEngine.update()
                 if not read_ok then
                     end_session(session, "layer_error")
                 else
+                    if is_dodge_session(session) then
+                        local n = math.max(1, tonumber(CFG.dodge_debug_every_n_frames) or 1)
+                        session.dodge_dbg_tick = (session.dodge_dbg_tick or 0) + 1
+                        if (session.dodge_dbg_tick % n) == 0 then
+                            dbg_dodge(session, string.format(
+                                "UPDATE elapsed=%.3f frame=%.2f/%.2f speed=%.3f bank=%s moved=%.3f wall_hit=%s wall_hits=%d",
+                                elapsed,
+                                tonumber(session.engine_frame or -1) or -1,
+                                tonumber(session.end_frame or -1) or -1,
+                                tonumber(session.engine_speed or -1) or -1,
+                                tostring(session.cur_bank_id),
+                                tonumber(session.moved or 0) or 0,
+                                tostring(session.wall_hit),
+                                tonumber(session.wall_drift_hits or 0) or 0
+                            ))
+                        end
+                        -- If collision/root-motion recovery is active and the engine
+                        -- frame suddenly resets backward, force a clean session end.
+                        local prev_upd = session.prev_update_frame
+                        local cur_upd = tonumber(session.engine_frame or 0) or 0
+                        if prev_upd ~= nil
+                           and (cur_upd + 0.75) < prev_upd
+                           and (session.moved or 0) > 0.25
+                           and (session.wall_hit or session.root_motion_halted) then
+                            session.force_normal_speed = true
+                            pcall(function()
+                                if session.layer then session.layer:call("set_Speed", 1.0) end
+                            end)
+                            dbg_dodge(session, string.format(
+                                "UPDATE frame reset recovery prev=%.2f cur=%.2f speed_normalized=true",
+                                tonumber(prev_upd or 0) or 0,
+                                cur_upd
+                            ))
+                        end
+                        session.prev_update_frame = cur_upd
+                    end
+
+                    -- Keep custom playback speed stable even if locomotion/input state
+                    -- briefly pushes the layer speed toward 0.
+                    local desired_speed = tonumber(session.def and session.def.speed) or 1.0
+                    if session.force_normal_speed then
+                        desired_speed = 1.0
+                    elseif is_dodge_session(session) and session.root_motion_halted and not session.wall_hit then
+                        desired_speed = 1.0
+                    end
+                    if math.abs((session.engine_speed or 0) - desired_speed) > 0.01 then
+                        pcall(function() session.layer:call("set_Speed", desired_speed) end)
+                    end
+
                     -- Maintain overlay blend state every frame (engine/FSM may reset)
                     if session.is_overlay then
                         pcall(function()
                             session.layer:call("set_BlendRate", 1.0)
-                            session.layer:call("set_BlendMode", 0)  -- Overwrite
+                            session.layer:call("set_BlendMode", 1)  -- AddBlend
                             -- Check if engine reset JointBlendRate (sample joint 0)
                             local need_reset = false
                             local jb0 = session.layer:call("getJointBlendRate", 0)
@@ -985,10 +1134,25 @@ function PlaybackEngine.update()
                         if not ended and session.engine_frame >= session.end_frame - 1 then
                             ended = true
                         end
-                        -- Bank change detection (FSM took over)
+                        -- Bank change detection (FSM took over). For fsm_mode=none,
+                        -- bank changes can happen during normal locomotion updates and
+                        -- should not force-end the custom session.
                         local expected_bank = session.def.bank_id or 0
-                        if not ended and session.cur_bank_id ~= 0 and session.cur_bank_id ~= expected_bank then
+                        local allow_bank_end = (session.def.fsm_mode or "pause") ~= "none"
+                        if allow_bank_end and not ended and session.cur_bank_id ~= 0 and session.cur_bank_id ~= expected_bank then
                             ended = true
+                        end
+                        -- Tight-space safeguard: if dodge playback frame state gets
+                        -- sticky/loopy while blocked by collision, finish after one
+                        -- expected animation cycle so movement state can recover cleanly.
+                        if not ended and is_dodge_session(session) then
+                            local spd = math.max(tonumber(session.def and session.def.speed) or 1.0, 0.001)
+                            local ef = math.max(tonumber(session.end_frame) or KNOWN_END_FRAME_DEFAULT, 1)
+                            local expected_duration = (ef + 1.0) / (60.0 * spd)
+                            local settle = session.wall_hit and 0.20 or 0.35
+                            if elapsed >= (expected_duration + settle) then
+                                ended = true
+                            end
                         end
                     end
 
@@ -1018,45 +1182,197 @@ local function apply_session_root_motion(session)
     if not def.movement or not def.movement.distance then return end
     if def.movement.distance <= 0 then return end
     if not session.move_dir or not session.start_pos then return end
-    if session.wall_hit then return end
+    if session.wall_hit or session.root_motion_halted then return end
     if not player_xform then return end
 
-    local progress = session.engine_frame / math.max(session.end_frame, 1)
+    -- Read frame directly from the live layer in PrepareRendering to avoid
+    -- on_frame -> PrepareRendering timing lag that causes visible start/end stalls.
+    local live_frame = session.engine_frame or 0
+    -- Keep a stable end-frame reference for root motion. Layer get_EndFrame can
+    -- jump between unrelated state values (e.g. 80 -> 2415) and causes severe
+    -- progress jitter/stalls.
+    local live_end = session.end_frame or KNOWN_END_FRAME_DEFAULT
+    if session.layer then
+        pcall(function()
+            local f = tonumber(session.layer:call("get_Frame"))
+            if f then live_frame = f end
+        end)
+    end
+
+    local dodge_dbg = is_dodge_session(session)
+
+    -- If the live frame jumps backward or stalls for too long, stop root motion
+    -- for this session to prevent release-triggered teleport/slide artifacts.
+    local prev_live = session.rm_prev_live_frame
+    if prev_live ~= nil then
+        if live_frame + 1.0 < prev_live then
+            session.root_motion_halted = true
+            session.force_normal_speed = true
+            pcall(function()
+                if session.layer then session.layer:call("set_Speed", 1.0) end
+            end)
+            if dodge_dbg then
+                dbg_dodge(session, string.format(
+                    "RM halted: frame reset detected prev=%.2f cur=%.2f",
+                    tonumber(prev_live or 0) or 0,
+                    tonumber(live_frame or 0) or 0
+                ))
+            end
+            return
+        end
+        if math.abs(live_frame - prev_live) < 0.01 then
+            session.rm_stall_hits = (session.rm_stall_hits or 0) + 1
+        else
+            session.rm_stall_hits = 0
+        end
+        if (session.rm_stall_hits or 0) >= 6 and (session.moved or 0) > 0.2 then
+            session.root_motion_halted = true
+            session.force_normal_speed = true
+            pcall(function()
+                if session.layer then session.layer:call("set_Speed", 1.0) end
+            end)
+            if dodge_dbg then
+                dbg_dodge(session, string.format(
+                    "RM halted: frame stalled hits=%d frame=%.2f moved=%.3f",
+                    tonumber(session.rm_stall_hits or 0) or 0,
+                    tonumber(live_frame or 0) or 0,
+                    tonumber(session.moved or 0) or 0
+                ))
+            end
+            return
+        end
+    end
+    session.rm_prev_live_frame = live_frame
+
+    local progress = live_frame / math.max(live_end, 1)
     local move_start = def.movement.start_pct or 0.01
     local move_end = def.movement.end_pct or 0.99
+    if dodge_dbg then
+        local n = math.max(1, tonumber(CFG.dodge_debug_every_n_frames) or 1)
+        session.dodge_rm_dbg_tick = (session.dodge_rm_dbg_tick or 0) + 1
+        if (session.dodge_rm_dbg_tick % n) == 0 then
+            dbg_dodge(session, string.format(
+                "RM pre progress=%.4f live_frame=%.2f live_end=%.2f moved=%.3f",
+                tonumber(progress or 0) or 0,
+                tonumber(live_frame or 0) or 0,
+                tonumber(live_end or 0) or 0,
+                tonumber(session.moved or 0) or 0
+            ))
+        end
+    end
 
-    -- Wall detection
-    if session.last_set_pos and player_cc and session.moved > 0.3 then
+    -- Wall detection (optional per-animation; enabled unless explicitly false).
+    if def.movement.wall_detection ~= false and session.last_set_pos and player_cc and session.moved > 0.3 then
         pcall(function()
             local actual = player_xform:call("get_Position")
             if actual then
                 local dx = actual.x - session.last_set_pos.x
                 local dz = actual.z - session.last_set_pos.z
                 local drift = math.sqrt(dx * dx + dz * dz)
-                if drift > 0.15 then
+                -- Tight-space collisions often produce one short drift spike
+                -- right before the animation frame resets; latch sooner.
+                if drift > 0.02 and (session.moved or 0) > 0.30 then
+                    session.wall_drift_hits = (session.wall_drift_hits or 0) + 1
+                else
+                    session.wall_drift_hits = 0
+                end
+                if dodge_dbg then
+                    dbg_dodge(session, string.format(
+                        "RM collision drift=%.3f hits=%d pos_actual=(%.3f,%.3f,%.3f) pos_set=(%.3f,%.3f,%.3f)",
+                        tonumber(drift or 0) or 0,
+                        tonumber(session.wall_drift_hits or 0) or 0,
+                        tonumber(actual.x or 0) or 0,
+                        tonumber(actual.y or 0) or 0,
+                        tonumber(actual.z or 0) or 0,
+                        tonumber(session.last_set_pos.x or 0) or 0,
+                        tonumber(session.last_set_pos.y or 0) or 0,
+                        tonumber(session.last_set_pos.z or 0) or 0
+                    ))
+                end
+                -- One confirmed post-start drift hit is enough to latch in
+                -- narrow spaces; tiny jitter stays below threshold.
+                if (session.wall_drift_hits or 0) >= 1 then
                     session.wall_hit = true
+                    session.root_motion_halted = true
                     player_cc:call("warp")
+                    if dodge_dbg then
+                        dbg_dodge(session, "RM collision latched wall_hit=true")
+                    end
                 end
             end
         end)
-        if session.wall_hit then return end
+        if session.wall_hit then
+            -- Keep animation playing to completion, but stop further root-motion
+            -- translation for this session once we confirm obstruction.
+            if dodge_dbg then
+                dbg_dodge(session, "RM blocked: root motion halted, animation continues")
+            end
+            return
+        end
     end
 
     if progress < move_start or progress > move_end then return end
 
-    local move_progress = (progress - move_start) / (move_end - move_start)
+    local denom = math.max(0.0001, (move_end - move_start))
+    local move_progress = (progress - move_start) / denom
     move_progress = math.min(1.0, math.max(0.0, move_progress))
-    local eased = move_progress * move_progress * (3.0 - 2.0 * move_progress)
-    local target_dist = def.movement.distance * eased
+    -- Hybrid curve keeps some accel/decel feel but avoids zero-velocity stalls at
+    -- the very beginning/end (which can look like brief freezes).
+    local smooth = move_progress * move_progress * (3.0 - 2.0 * move_progress)
+    local min_vel_ratio = def.movement.min_velocity_ratio or 0.35
+    local shaped = (min_vel_ratio * move_progress) + ((1.0 - min_vel_ratio) * smooth)
+    local target_dist = def.movement.distance * shaped
+    local prev_dist = session.last_applied_dist or 0.0
+    local delta_dist = math.max(0.0, target_dist - prev_dist)
+    -- Conservative default to reduce thin-collider tunneling (e.g. waist-high
+    -- fences) during root-motion warps.
+    local max_step = def.movement.max_step_per_frame or 0.10
+    if delta_dist > max_step then
+        target_dist = prev_dist + max_step
+    end
+    -- Keep target distance monotonic so tiny frame jitter cannot cause micro-pauses.
+    if target_dist < (session.moved or 0) then
+        target_dist = session.moved or target_dist
+    end
     session.moved = target_dist
+    session.last_applied_dist = target_dist
+    if dodge_dbg then
+        local n = math.max(1, tonumber(CFG.dodge_debug_every_n_frames) or 1)
+        if (session.dodge_rm_dbg_tick % n) == 0 then
+            dbg_dodge(session, string.format(
+                "RM apply progress=%.4f move_p=%.4f target=%.3f prev=%.3f step=%.3f max_step=%.3f",
+                tonumber(progress or 0) or 0,
+                tonumber(move_progress or 0) or 0,
+                tonumber(target_dist or 0) or 0,
+                tonumber(prev_dist or 0) or 0,
+                tonumber(delta_dist or 0) or 0,
+                tonumber(max_step or 0) or 0
+            ))
+        end
+    end
 
     pcall(function()
         local new_x = session.start_pos.x + session.move_dir.x * target_dist
         local new_y = session.start_pos.y
+        pcall(function()
+            local cur = player_xform:call("get_Position")
+            if cur then new_y = cur.y end
+        end)
         local new_z = session.start_pos.z + session.move_dir.z * target_dist
         player_xform:call("set_Position", Vector3f.new(new_x, new_y, new_z))
         if player_cc then player_cc:call("warp") end
         session.last_set_pos = { x = new_x, y = new_y, z = new_z }
+        if dodge_dbg then
+            local n = math.max(1, tonumber(CFG.dodge_debug_every_n_frames) or 1)
+            if (session.dodge_rm_dbg_tick % n) == 0 then
+                dbg_dodge(session, string.format(
+                    "RM set_pos=(%.3f,%.3f,%.3f)",
+                    tonumber(new_x or 0) or 0,
+                    tonumber(new_y or 0) or 0,
+                    tonumber(new_z or 0) or 0
+                ))
+            end
+        end
     end)
 end
 
@@ -1493,8 +1809,12 @@ local function poll_events()
             if chain_ok then consumed = chain_result end
             if not consumed then
                 local data = { keycode = keycode, key_name = KB_KEY_NAMES[keycode] or string.format("0x%02X", keycode) }
-                pcall(EventBus.emit, "key_pressed", data)
-                pcall(dispatch_event_animations, "key_pressed", data)
+                local blocked = false
+                local ev_ok, ev_result = pcall(EventBus.emit, "key_pressed", data)
+                if ev_ok then blocked = (ev_result == true) end
+                if not blocked then
+                    pcall(dispatch_event_animations, "key_pressed", data)
+                end
             end
         end
         prev_keys[keycode] = down
@@ -1512,8 +1832,12 @@ local function poll_events()
                 if chain_ok then consumed = chain_result end
                 if not consumed then
                     local data = { keycode = keycode, key_name = "PAD", pad_button = pad_flag }
-                    pcall(EventBus.emit, "key_pressed", data)
-                    pcall(dispatch_event_animations, "key_pressed", data)
+                    local blocked = false
+                    local ev_ok, ev_result = pcall(EventBus.emit, "key_pressed", data)
+                    if ev_ok then blocked = (ev_result == true) end
+                    if not blocked then
+                        pcall(dispatch_event_animations, "key_pressed", data)
+                    end
                 end
             end
         end
@@ -2048,6 +2372,13 @@ re.on_draw_ui(function()
             local c
             c, CFG.debug_log = imgui.checkbox("Debug log", CFG.debug_log)
             if c then changed = true end
+            c, CFG.dodge_debug = imgui.checkbox("Dodge deep debug", CFG.dodge_debug)
+            if c then changed = true end
+            c, CFG.dodge_debug_every_n_frames = imgui.slider_float("Dodge debug cadence (frames)", CFG.dodge_debug_every_n_frames, 1, 20, "%.0f")
+            if c then
+                changed = true
+                CFG.dodge_debug_every_n_frames = math.max(1, math.floor(CFG.dodge_debug_every_n_frames))
+            end
             c, CFG.proximity_radius = imgui.slider_float("Proximity radius (m)", CFG.proximity_radius, 1.0, 20.0, "%.1f")
             if c then changed = true end
             c, CFG.max_concurrent = imgui.slider_float("Max concurrent", CFG.max_concurrent, 1, 16, "%.0f")

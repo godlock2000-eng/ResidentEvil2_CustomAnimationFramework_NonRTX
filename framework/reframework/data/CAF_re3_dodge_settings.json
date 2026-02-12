@@ -1,0 +1,17 @@
+{
+    "blend_frames": 0.0,
+    "debug_log": true,
+    "dodge_cooldown": 1.5,
+    "dodge_distance": 2.5,
+    "dodge_key": 86,
+    "dodge_pad_button": 1024,
+    "iframes_duration_frames": 45,
+    "iframes_enabled": true,
+    "iframes_start_frame": 0,
+    "move_enabled": true,
+    "move_end": 1.0,
+    "move_start": 0.08,
+    "pad_stick_deadzone": 0.5,
+    "speed": 2.0,
+    "stop_on_direction_release": true
+}
